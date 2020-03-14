@@ -54,7 +54,7 @@ Example:
 ```shell
 Configurable fields: 
 
- * vm-driver
+ * driver
  * feature-gates
  * v
  * cpus
@@ -77,7 +77,6 @@ Configurable fields:
  * dashboard
  * addon-manager
  * default-storageclass
- * heapster
  * efk
  * ingress
  * registry
@@ -108,7 +107,7 @@ Example output:
 ```shell
 - memory: 4096
 - registry: true
-- vm-driver: vmware
+- driver: vmware
 - dashboard: true
 - gvisor: true
 ```
@@ -123,7 +122,7 @@ minikube config set <key> <value>
 For example:
 
 ```shell
-minikube config set vm-driver hyperkit
+minikube config set driver hyperkit
 ```
 
 ## Environment Configuration

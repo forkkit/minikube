@@ -29,7 +29,7 @@ import (
 
 func annotateDefaultStorageClass(storage storagev1.StorageV1Interface, class *v1.StorageClass, enable bool) error {
 	isDefault := strconv.FormatBool(enable)
-	metav1.SetMetaDataAnnotation(&class.ObjectMeta, "storageclass.beta.kubernetes.io/is-default-class", isDefault)
+	metav1.SetMetaDataAnnotation(&class.ObjectMeta, "storageclass.kubernetes.io/is-default-class", isDefault)
 	_, err := storage.StorageClasses().Update(class)
 
 	return err
@@ -70,7 +70,7 @@ func SetDefaultStorageClass(storage storagev1.StorageV1Interface, name string) e
 	return nil
 }
 
-// GetStorageV1 return storage v1 interface for client
+// GetStoragev1 return storage v1 interface for client
 func GetStoragev1() (storagev1.StorageV1Interface, error) {
 	client, err := getClient()
 	if err != nil {

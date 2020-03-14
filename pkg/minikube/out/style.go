@@ -63,9 +63,8 @@ var styles = map[StyleEnum]style{
 	Reconfiguring: {Prefix: "📯  "},
 	Stopping:      {Prefix: "✋  "},
 	Stopped:       {Prefix: "🛑  "},
-	WarningType:   {Prefix: "⚠️  ", LowPrefix: lowWarning},
+	Warning:       {Prefix: "❗  ", LowPrefix: lowWarning},
 	Waiting:       {Prefix: "⌛  "},
-	WaitingPods:   {Prefix: "⌛  ", OmitNewline: true},
 	Usage:         {Prefix: "💡  "},
 	Launch:        {Prefix: "🚀  "},
 	Sad:           {Prefix: "😿  "},
@@ -73,7 +72,7 @@ var styles = map[StyleEnum]style{
 	Option:        {Prefix: "    ▪ ", LowPrefix: lowIndent}, // Indented bullet
 	Command:       {Prefix: "    ▪ ", LowPrefix: lowIndent}, // Indented bullet
 	LogEntry:      {Prefix: "    "},                         // Indent
-	Crushed:       {Prefix: "💔  "},
+	Deleted:       {Prefix: "💀  "},
 	URL:           {Prefix: "👉  ", LowPrefix: lowIndent},
 	Documentation: {Prefix: "📘  "},
 	Issues:        {Prefix: "⁉️   "},
@@ -81,6 +80,9 @@ var styles = map[StyleEnum]style{
 	Check:         {Prefix: "✅  "},
 	Celebration:   {Prefix: "🎉  "},
 	Workaround:    {Prefix: "👉  ", LowPrefix: lowIndent},
+	Sparkle:       {Prefix: "✨  "},
+	Pause:         {Prefix: "⏸️  "},
+	Unpause:       {Prefix: "⏯️  "},
 
 	// Specialized purpose styles
 	ISODownload:      {Prefix: "💿  "},
@@ -113,6 +115,9 @@ var styles = map[StyleEnum]style{
 	Unmount:          {Prefix: "🔥  "},
 	MountOptions:     {Prefix: "💾  "},
 	Fileserver:       {Prefix: "🚀  ", OmitNewline: true},
+	DryRun:           {Prefix: "🏜️   "},
+	AddonEnable:      {Prefix: "🌟  "},
+	AddonDisable:     {Prefix: "🌑  "},
 }
 
 // Add a prefix to a string

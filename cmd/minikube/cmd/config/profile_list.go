@@ -17,16 +17,25 @@ limitations under the License.
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"k8s.io/minikube/pkg/minikube/config"
+	"k8s.io/minikube/pkg/minikube/driver"
 	"k8s.io/minikube/pkg/minikube/exit"
+	"k8s.io/minikube/pkg/minikube/machine"
 	"k8s.io/minikube/pkg/minikube/out"
 
+	"github.com/golang/glog"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
+)
+
+var (
+	output string
 )
 
 var profileListCmd = &cobra.Command{
@@ -35,42 +44,121 @@ var profileListCmd = &cobra.Command{
 	Long:  "Lists all valid minikube profiles and detects all possible invalid profiles.",
 	Run: func(cmd *cobra.Command, args []string) {
 
-		var validData [][]string
-
-		table := tablewriter.NewWriter(os.Stdout)
-		table.SetHeader([]string{"Profile", "VM Driver", "NodeIP", "Node Port", "Kubernetes Version"})
-		table.SetAutoFormatHeaders(false)
-		table.SetBorders(tablewriter.Border{Left: true, Top: true, Right: true, Bottom: true})
-		table.SetCenterSeparator("|")
-		validProfiles, invalidProfiles, err := config.ListProfiles()
-
-		if len(validProfiles) == 0 || err != nil {
-			exit.UsageT("No minikube profile was found. You can create one using `minikube start`.")
-		}
-		for _, p := range validProfiles {
-			validData = append(validData, []string{p.Name, p.Config.MachineConfig.VMDriver, p.Config.KubernetesConfig.NodeIP, strconv.Itoa(p.Config.KubernetesConfig.NodePort), p.Config.KubernetesConfig.KubernetesVersion})
+		switch strings.ToLower(output) {
+		case "json":
+			printProfilesJSON()
+		case "table":
+			printProfilesTable()
+		default:
+			exit.WithCodeT(exit.BadUsage, fmt.Sprintf("invalid output format: %s. Valid values: 'table', 'json'", output))
 		}
 
-		table.AppendBulk(validData)
-		table.Render()
-
-		if invalidProfiles != nil {
-			out.T(out.WarningType, "Found {{.number}} invalid profile(s) ! ", out.V{"number": len(invalidProfiles)})
-			for _, p := range invalidProfiles {
-				out.T(out.Empty, "\t "+p.Name)
-			}
-			out.T(out.Tip, "You can delete them using the following command(s): ")
-			for _, p := range invalidProfiles {
-				out.String(fmt.Sprintf("\t $ minikube delete -p %s \n", p.Name))
-			}
-
-		}
-		if err != nil {
-			exit.WithCodeT(exit.Config, fmt.Sprintf("error loading profiles: %v", err))
-		}
 	},
 }
 
+var printProfilesTable = func() {
+
+	var validData [][]string
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Profile", "VM Driver", "Runtime", "IP", "Port", "Version", "Status"})
+	table.SetAutoFormatHeaders(false)
+	table.SetBorders(tablewriter.Border{Left: true, Top: true, Right: true, Bottom: true})
+	table.SetCenterSeparator("|")
+	validProfiles, invalidProfiles, err := config.ListProfiles()
+
+	if len(validProfiles) == 0 || err != nil {
+		exit.UsageT("No minikube profile was found. You can create one using `minikube start`.")
+	}
+	api, err := machine.NewAPIClient()
+	if err != nil {
+		glog.Errorf("failed to get machine api client %v", err)
+	}
+	defer api.Close()
+
+	for _, p := range validProfiles {
+		cp, err := config.PrimaryControlPlane(p.Config)
+		if err != nil {
+			exit.WithError("error getting primary control plane", err)
+		}
+		p.Status, err = machine.Status(api, driver.MachineName(*p.Config, cp))
+		if err != nil {
+			glog.Warningf("error getting host status for %s: %v", p.Name, err)
+		}
+		validData = append(validData, []string{p.Name, p.Config.Driver, p.Config.KubernetesConfig.ContainerRuntime, cp.IP, strconv.Itoa(cp.Port), p.Config.KubernetesConfig.KubernetesVersion, p.Status})
+	}
+
+	table.AppendBulk(validData)
+	table.Render()
+
+	if invalidProfiles != nil {
+		out.T(out.Warning, "Found {{.number}} invalid profile(s) ! ", out.V{"number": len(invalidProfiles)})
+		for _, p := range invalidProfiles {
+			out.T(out.Empty, "\t "+p.Name)
+		}
+		out.T(out.Tip, "You can delete them using the following command(s): ")
+		for _, p := range invalidProfiles {
+			out.String(fmt.Sprintf("\t $ minikube delete -p %s \n", p.Name))
+		}
+
+	}
+
+	if err != nil {
+		glog.Warningf("error loading profiles: %v", err)
+	}
+
+}
+
+var printProfilesJSON = func() {
+	api, err := machine.NewAPIClient()
+	if err != nil {
+		glog.Errorf("failed to get machine api client %v", err)
+	}
+	defer api.Close()
+
+	validProfiles, invalidProfiles, err := config.ListProfiles()
+	for _, v := range validProfiles {
+		cp, err := config.PrimaryControlPlane(v.Config)
+		if err != nil {
+			exit.WithError("error getting primary control plane", err)
+		}
+		status, err := machine.Status(api, driver.MachineName(*v.Config, cp))
+		if err != nil {
+			glog.Warningf("error getting host status for %s: %v", v.Name, err)
+		}
+		v.Status = status
+	}
+
+	var valid []*config.Profile
+	var invalid []*config.Profile
+
+	if validProfiles != nil {
+		valid = validProfiles
+	} else {
+		valid = []*config.Profile{}
+	}
+
+	if invalidProfiles != nil {
+		invalid = invalidProfiles
+	} else {
+		invalid = []*config.Profile{}
+	}
+
+	var body = map[string]interface{}{}
+
+	if err == nil || config.IsNotExist(err) {
+		body["valid"] = valid
+		body["invalid"] = invalid
+		jsonString, _ := json.Marshal(body)
+		out.String(string(jsonString))
+	} else {
+		body["error"] = err
+		jsonString, _ := json.Marshal(body)
+		out.String(string(jsonString))
+		os.Exit(exit.Failure)
+	}
+}
+
 func init() {
+	profileListCmd.Flags().StringVarP(&output, "output", "o", "table", "The output format. One of 'json', 'table'")
 	ProfileCmd.AddCommand(profileListCmd)
 }

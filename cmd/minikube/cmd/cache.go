@@ -19,11 +19,14 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 	cmdConfig "k8s.io/minikube/cmd/minikube/cmd/config"
-	"k8s.io/minikube/pkg/minikube/config"
-	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/exit"
+	"k8s.io/minikube/pkg/minikube/image"
 	"k8s.io/minikube/pkg/minikube/machine"
+	"k8s.io/minikube/pkg/minikube/node"
 )
+
+// cacheImageConfigKey is the config field name used to store which images we have previously cached
+const cacheImageConfigKey = "cache"
 
 // cacheCmd represents the cache command
 var cacheCmd = &cobra.Command{
@@ -43,7 +46,7 @@ var addCacheCmd = &cobra.Command{
 			exit.WithError("Failed to cache and load images", err)
 		}
 		// Add images to config file
-		if err := cmdConfig.AddToConfigMap(constants.Cache, args); err != nil {
+		if err := cmdConfig.AddToConfigMap(cacheImageConfigKey, args); err != nil {
 			exit.WithError("Failed to update config", err)
 		}
 	},
@@ -56,56 +59,31 @@ var deleteCacheCmd = &cobra.Command{
 	Long:  "Delete an image from the local cache.",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Delete images from config file
-		if err := cmdConfig.DeleteFromConfigMap(constants.Cache, args); err != nil {
+		if err := cmdConfig.DeleteFromConfigMap(cacheImageConfigKey, args); err != nil {
 			exit.WithError("Failed to delete images from config", err)
 		}
 		// Delete images from cache/images directory
-		if err := machine.DeleteFromImageCacheDir(args); err != nil {
+		if err := image.DeleteFromCacheDir(args); err != nil {
 			exit.WithError("Failed to delete images", err)
 		}
 	},
 }
 
-func imagesInConfigFile() ([]string, error) {
-	configFile, err := config.ReadConfig(constants.ConfigFile)
-	if err != nil {
-		return nil, err
-	}
-	if values, ok := configFile[constants.Cache]; ok {
-		var images []string
-		for key := range values.(map[string]interface{}) {
-			images = append(images, key)
+// reloadCacheCmd represents the cache reload command
+var reloadCacheCmd = &cobra.Command{
+	Use:   "reload",
+	Short: "reload cached images.",
+	Long:  "reloads images previously added using the 'cache add' subcommand",
+	Run: func(cmd *cobra.Command, args []string) {
+		err := node.CacheAndLoadImagesInConfig()
+		if err != nil {
+			exit.WithError("Failed to reload cached images", err)
 		}
-		return images, nil
-	}
-	return []string{}, nil
-}
-
-// CacheImagesInConfigFile caches the images currently in the config file (minikube start)
-func CacheImagesInConfigFile() error {
-	images, err := imagesInConfigFile()
-	if err != nil {
-		return err
-	}
-	if len(images) == 0 {
-		return nil
-	}
-	return machine.CacheImages(images, constants.ImageCacheDir)
-}
-
-// loadCachedImagesInConfigFile loads the images currently in the config file (minikube start)
-func loadCachedImagesInConfigFile() error {
-	images, err := imagesInConfigFile()
-	if err != nil {
-		return err
-	}
-	if len(images) == 0 {
-		return nil
-	}
-	return machine.CacheAndLoadImages(images)
+	},
 }
 
 func init() {
 	cacheCmd.AddCommand(addCacheCmd)
 	cacheCmd.AddCommand(deleteCacheCmd)
+	cacheCmd.AddCommand(reloadCacheCmd)
 }

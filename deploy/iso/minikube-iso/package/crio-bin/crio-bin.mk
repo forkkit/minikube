@@ -4,14 +4,15 @@
 #
 ################################################################################
 
-CRIO_BIN_VERSION = v1.15.2
-CRIO_BIN_COMMIT = b7316701c17ebc7901d10a716f15e66008c52525
+CRIO_BIN_VERSION = v1.17.0
+CRIO_BIN_COMMIT = 6d0ffae63b9b7d8f07e7f9cf50736a67fb31faf3
 CRIO_BIN_SITE = https://github.com/cri-o/cri-o/archive
 CRIO_BIN_SOURCE = $(CRIO_BIN_VERSION).tar.gz
 CRIO_BIN_DEPENDENCIES = host-go libgpgme
 CRIO_BIN_GOPATH = $(@D)/_output
 CRIO_BIN_ENV = \
 	CGO_ENABLED=1 \
+	GO111MODULE=off \
 	GOPATH="$(CRIO_BIN_GOPATH)" \
 	GOBIN="$(CRIO_BIN_GOPATH)/bin" \
 	PATH=$(CRIO_BIN_GOPATH)/bin:$(BR_PATH)
@@ -25,8 +26,8 @@ endef
 define CRIO_BIN_CONFIGURE_CMDS
 	mkdir -p $(CRIO_BIN_GOPATH)/src/github.com/cri-o
 	ln -sf $(@D) $(CRIO_BIN_GOPATH)/src/github.com/cri-o/cri-o
-	# Copy pre-generated conmon/config.h - see <https://github.com/cri-o/cri-o/issues/2575>
-	cp $(BR2_EXTERNAL_MINIKUBE_PATH)/package/crio-bin/conmon-config.h $(@D)/conmon/config.h
+	# disable the "automatic" go module detection
+	sed -e 's/go help mod/false/' -i $(@D)/Makefile
 endef
 
 define CRIO_BIN_BUILD_CMDS
@@ -42,19 +43,16 @@ define CRIO_BIN_INSTALL_TARGET_CMDS
 		$(@D)/bin/crio \
 		$(TARGET_DIR)/usr/bin/crio
 	$(INSTALL) -Dm755 \
-		$(@D)/bin/conmon \
-		$(TARGET_DIR)/usr/libexec/crio/conmon
-	$(INSTALL) -Dm755 \
-		$(@D)/bin/pause \
-		$(TARGET_DIR)/usr/libexec/crio/pause
+		$(@D)/bin/pinns \
+		$(TARGET_DIR)/usr/bin/pinns
 	$(INSTALL) -Dm644 \
-		$(BR2_EXTERNAL_MINIKUBE_PATH)/package/crio-bin/crio.conf \
+		$(CRIO_BIN_PKGDIR)/crio.conf \
 		$(TARGET_DIR)/etc/crio/crio.conf
 	$(INSTALL) -Dm644 \
-		$(BR2_EXTERNAL_MINIKUBE_PATH)/package/crio-bin/policy.json \
+		$(CRIO_BIN_PKGDIR)/policy.json \
 		$(TARGET_DIR)/etc/containers/policy.json
 	$(INSTALL) -Dm644 \
-		$(BR2_EXTERNAL_MINIKUBE_PATH)/package/crio-bin/registries.conf \
+		$(CRIO_BIN_PKGDIR)/registries.conf \
 		$(TARGET_DIR)/etc/containers/registries.conf
 
 	mkdir -p $(TARGET_DIR)/etc/sysconfig
@@ -64,8 +62,11 @@ endef
 define CRIO_BIN_INSTALL_INIT_SYSTEMD
 	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) install.systemd DESTDIR=$(TARGET_DIR) PREFIX=$(TARGET_DIR)/usr
 	$(INSTALL) -Dm644 \
-		$(BR2_EXTERNAL_MINIKUBE_PATH)/package/crio-bin/crio.service \
+		$(CRIO_BIN_PKGDIR)/crio.service \
 		$(TARGET_DIR)/usr/lib/systemd/system/crio.service
+	$(INSTALL) -Dm644 \
+		$(CRIO_BIN_PKGDIR)/crio-wipe.service \
+		$(TARGET_DIR)/usr/lib/systemd/system/crio-wipe.service
 	$(call link-service,crio.service)
 	$(call link-service,crio-shutdown.service)
 endef

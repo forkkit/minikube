@@ -10,7 +10,8 @@ description: >
 
 ### Overview
 
-Run the kubernetes client, download it if necessary.
+Run the Kubernetes client, download it if necessary.
+Remember `--` after kubectl!
 
 ### Usage
 
@@ -22,7 +23,7 @@ minikube kubectl [flags]
 
 ```
 minikube kubectl -- --help
-kubectl get pods --namespace kube-system
+minikube kubectl -- get pods --namespace kube-system
 ```
 
 

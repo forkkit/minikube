@@ -35,7 +35,7 @@ const (
 	Reconfiguring
 	Stopping
 	Stopped
-	WarningType
+	Warning
 	Waiting
 	WaitingPods
 	Usage
@@ -45,7 +45,7 @@ const (
 	Option
 	Command
 	LogEntry
-	Crushed
+	Deleted
 	URL
 	Documentation
 	Issues
@@ -83,4 +83,10 @@ const (
 	Fileserver
 	Empty
 	Workaround
+	Sparkle
+	Pause
+	Unpause
+	DryRun
+	AddonEnable
+	AddonDisable
 )

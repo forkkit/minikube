@@ -20,15 +20,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"syscall"
 
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
-	pkg_config "k8s.io/minikube/pkg/minikube/config"
+	"github.com/spf13/viper"
+	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
-	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/machine"
+	"k8s.io/minikube/pkg/minikube/node"
 	"k8s.io/minikube/pkg/minikube/out"
 )
 
@@ -36,10 +36,11 @@ import (
 var kubectlCmd = &cobra.Command{
 	Use:   "kubectl",
 	Short: "Run kubectl",
-	Long: `Run the kubernetes client, download it if necessary.
+	Long: `Run the kubernetes client, download it if necessary. Remember -- after kubectl!
+
 Examples:
 minikube kubectl -- --help
-kubectl get pods --namespace kube-system`,
+minikube kubectl -- get pods --namespace kube-system`,
 	Run: func(cmd *cobra.Command, args []string) {
 		api, err := machine.NewAPIClient()
 		if err != nil {
@@ -48,14 +49,9 @@ kubectl get pods --namespace kube-system`,
 		}
 		defer api.Close()
 
-		cc, err := pkg_config.Load()
-		if err != nil && !os.IsNotExist(err) {
+		cc, err := config.Load(viper.GetString(config.ProfileName))
+		if err != nil && !config.IsNotExist(err) {
 			out.ErrLn("Error loading profile config: %v", err)
-		}
-
-		binary := "kubectl"
-		if runtime.GOOS == "windows" {
-			binary = "kubectl.exe"
 		}
 
 		version := constants.DefaultKubernetesVersion
@@ -63,9 +59,9 @@ kubectl get pods --namespace kube-system`,
 			version = cc.KubernetesConfig.KubernetesVersion
 		}
 
-		path, err := machine.CacheBinary(binary, version, runtime.GOOS, runtime.GOARCH)
+		path, err := node.CacheKubectlBinary(version)
 		if err != nil {
-			exit.WithError("Failed to download kubectl", err)
+			out.ErrLn("Error caching kubectl: %v", err)
 		}
 
 		glog.Infof("Running %s %v", path, args)

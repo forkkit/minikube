@@ -22,12 +22,58 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	cfg "k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 )
 
+func TestGetKuberneterVersion(t *testing.T) {
+	var tests = []struct {
+		description     string
+		expectedVersion string
+		paramVersion    string
+		cfg             *cfg.ClusterConfig
+	}{
+		{
+			description:     "kubernetes-version not given, no config",
+			expectedVersion: constants.DefaultKubernetesVersion,
+			paramVersion:    "",
+		},
+		{
+			description:     "kubernetes-version not given, config available",
+			expectedVersion: "v1.15.0",
+			paramVersion:    "",
+			cfg:             &cfg.ClusterConfig{KubernetesConfig: cfg.KubernetesConfig{KubernetesVersion: "v1.15.0"}},
+		},
+		{
+			description:     "kubernetes-version given, no config",
+			expectedVersion: "v1.15.0",
+			paramVersion:    "v1.15.0",
+		},
+		{
+			description:     "kubernetes-version given, config available",
+			expectedVersion: "v1.16.0",
+			paramVersion:    "v1.16.0",
+			cfg:             &cfg.ClusterConfig{KubernetesConfig: cfg.KubernetesConfig{KubernetesVersion: "v1.15.0"}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			viper.SetDefault(kubernetesVersion, test.paramVersion)
+			version := getKubernetesVersion(test.cfg)
+
+			// check whether we are getting the expected version
+			if version != test.expectedVersion {
+				t.Fatalf("test failed because the expected version %s is not returned", test.expectedVersion)
+			}
+		})
+	}
+}
+
 func TestGenerateCfgFromFlagsHTTPProxyHandling(t *testing.T) {
-	viper.SetDefault(memory, constants.DefaultMemorySize)
-	viper.SetDefault(humanReadableDiskSize, constants.DefaultDiskSize)
+	// Set default disk size value in lieu of flag init
+	viper.SetDefault(humanReadableDiskSize, defaultDiskSize)
+
 	originalEnv := os.Getenv("HTTP_PROXY")
 	defer func() {
 		err := os.Setenv("HTTP_PROXY", originalEnv)
@@ -66,15 +112,46 @@ func TestGenerateCfgFromFlagsHTTPProxyHandling(t *testing.T) {
 			if err := os.Setenv("HTTP_PROXY", test.proxy); err != nil {
 				t.Fatalf("Unexpected error setting HTTP_PROXY: %v", err)
 			}
-			config, err := generateCfgFromFlags(cmd, k8sVersion, "none")
+			config, _, err := generateCfgFromFlags(cmd, k8sVersion, "none")
 			if err != nil {
 				t.Fatalf("Got unexpected error %v during config generation", err)
 			}
 			// ignored proxy should not be in config
-			for _, v := range config.MachineConfig.DockerEnv {
+			for _, v := range config.DockerEnv {
 				if v == test.proxy && test.proxyIgnored {
 					t.Fatalf("Value %v not expected in dockerEnv but occurred", v)
 				}
+			}
+		})
+	}
+}
+
+func TestSuggestMemoryAllocation(t *testing.T) {
+	var tests = []struct {
+		description    string
+		sysLimit       int
+		containerLimit int
+		want           int
+	}{
+		{"128GB sys", 128000, 0, 6000},
+		{"64GB sys", 64000, 0, 6000},
+		{"16GB sys", 16384, 0, 4000},
+		{"odd sys", 14567, 0, 3600},
+		{"4GB sys", 4096, 0, 2200},
+		{"2GB sys", 2048, 0, 2048},
+		{"Unable to poll sys", 0, 0, 2200},
+		{"128GB sys, 16GB container", 128000, 16384, 16336},
+		{"64GB sys, 16GB container", 64000, 16384, 16000},
+		{"16GB sys, 4GB container", 16384, 4096, 4000},
+		{"4GB sys, 3.5GB container", 16384, 3500, 3452},
+		{"2GB sys, 2GB container", 16384, 2048, 2048},
+		{"2GB sys, unable to poll container", 16384, 0, 4000},
+	}
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			got := suggestMemoryAllocation(test.sysLimit, test.containerLimit)
+			if got != test.want {
+				t.Errorf("defaultMemorySize(sys=%d, container=%d) = %d, want: %d", test.sysLimit, test.containerLimit, got, test.want)
 			}
 		})
 	}

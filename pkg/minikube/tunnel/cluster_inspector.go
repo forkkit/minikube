@@ -24,8 +24,8 @@ import (
 	"github.com/docker/machine/libmachine/host"
 	"github.com/docker/machine/libmachine/state"
 	"github.com/pkg/errors"
-	"k8s.io/minikube/pkg/minikube/cluster"
 	"k8s.io/minikube/pkg/minikube/config"
+	"k8s.io/minikube/pkg/minikube/machine"
 	"k8s.io/minikube/pkg/util"
 )
 
@@ -37,7 +37,7 @@ type clusterInspector struct {
 
 func (m *clusterInspector) getStateAndHost() (HostState, *host.Host, error) {
 
-	h, err := cluster.CheckIfHostExistsAndLoad(m.machineAPI, m.machineName)
+	h, err := machine.LoadHost(m.machineAPI, m.machineName)
 
 	if err != nil {
 		err = errors.Wrapf(err, "error loading docker-machine host for: %s", m.machineName)
@@ -64,7 +64,7 @@ func (m *clusterInspector) getStateAndRoute() (HostState, *Route, error) {
 	if err != nil {
 		return hostState, nil, err
 	}
-	var c *config.Config
+	var c *config.ClusterConfig
 	c, err = m.configLoader.LoadConfigFromFile(m.machineName)
 	if err != nil {
 		err = errors.Wrapf(err, "error loading config for %s", m.machineName)
@@ -80,7 +80,7 @@ func (m *clusterInspector) getStateAndRoute() (HostState, *Route, error) {
 	return hostState, route, nil
 }
 
-func getRoute(host *host.Host, clusterConfig config.Config) (*Route, error) {
+func getRoute(host *host.Host, clusterConfig config.ClusterConfig) (*Route, error) {
 	hostDriverIP, err := host.Driver.GetIP()
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting host IP for %s", host.Name)

@@ -1,11 +1,11 @@
 {
-    "MachineConfig": {
+    "ClusterConfig": {
         "KeepContext": false,
         "MinikubeISO": "https://storage.googleapis.com/minikube/iso/minikube-v1.2.0.iso",
         "Memory": 2000,
         "CPUs": 2,
         "DiskSize": 20000,
-        "VMDriver": "hyperkit",
+        "Driver": "hyperkit",
         "ContainerRuntime": "docker",
         "HyperkitVpnKitSock": "",
         "HyperkitVSockPorts": [],

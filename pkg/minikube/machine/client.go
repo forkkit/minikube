@@ -19,6 +19,7 @@ package machine
 import (
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -35,13 +36,14 @@ import (
 	"github.com/docker/machine/libmachine/host"
 	"github.com/docker/machine/libmachine/mcnutils"
 	"github.com/docker/machine/libmachine/persist"
+	lib_provision "github.com/docker/machine/libmachine/provision"
 	"github.com/docker/machine/libmachine/ssh"
 	"github.com/docker/machine/libmachine/state"
 	"github.com/docker/machine/libmachine/swarm"
 	"github.com/docker/machine/libmachine/version"
 	"github.com/pkg/errors"
 	"k8s.io/minikube/pkg/minikube/command"
-	"k8s.io/minikube/pkg/minikube/constants"
+	"k8s.io/minikube/pkg/minikube/driver"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/localpath"
 	"k8s.io/minikube/pkg/minikube/out"
@@ -80,27 +82,25 @@ type LocalClient struct {
 }
 
 // NewHost creates a new Host
-func (api *LocalClient) NewHost(driverName string, rawDriver []byte) (*host.Host, error) {
-	var def registry.DriverDef
-	var err error
-	if def, err = registry.Driver(driverName); err != nil {
-		return nil, err
-	} else if !def.Builtin || def.DriverCreator == nil {
-		return api.legacyClient.NewHost(driverName, rawDriver)
+func (api *LocalClient) NewHost(drvName string, rawDriver []byte) (*host.Host, error) {
+	def := registry.Driver(drvName)
+	if def.Empty() {
+		return nil, fmt.Errorf("driver %q does not exist", drvName)
 	}
-
-	driver := def.DriverCreator()
-
-	err = json.Unmarshal(rawDriver, driver)
+	if def.Init == nil {
+		return api.legacyClient.NewHost(drvName, rawDriver)
+	}
+	d := def.Init()
+	err := json.Unmarshal(rawDriver, d)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Error getting driver %s", string(rawDriver))
 	}
 
 	return &host.Host{
 		ConfigVersion: version.ConfigVersion,
-		Name:          driver.GetMachineName(),
-		Driver:        driver,
-		DriverName:    driver.DriverName(),
+		Name:          d.GetMachineName(),
+		Driver:        d,
+		DriverName:    d.DriverName(),
 		HostOptions: &host.Options{
 			AuthOptions: &auth.Options{
 				CertDir:          api.certsDir,
@@ -127,14 +127,14 @@ func (api *LocalClient) Load(name string) (*host.Host, error) {
 		return nil, errors.Wrapf(err, "filestore %q", name)
 	}
 
-	var def registry.DriverDef
-	if def, err = registry.Driver(h.DriverName); err != nil {
-		return nil, err
-	} else if !def.Builtin || def.DriverCreator == nil {
+	def := registry.Driver(h.DriverName)
+	if def.Empty() {
+		return nil, fmt.Errorf("driver %q does not exist", h.DriverName)
+	}
+	if def.Init == nil {
 		return api.legacyClient.Load(name)
 	}
-
-	h.Driver = def.DriverCreator()
+	h.Driver = def.Init()
 	return h, json.Unmarshal(h.RawDriver, h.Driver)
 }
 
@@ -148,11 +148,15 @@ func (api *LocalClient) Close() error {
 
 // CommandRunner returns best available command runner for this host
 func CommandRunner(h *host.Host) (command.Runner, error) {
-	if h.DriverName == constants.DriverMock {
+	if h.DriverName == driver.Mock {
 		return &command.FakeCommandRunner{}, nil
 	}
-	if h.DriverName == constants.DriverNone {
-		return &command.ExecRunner{}, nil
+	if driver.BareMetal(h.Driver.DriverName()) {
+		return command.NewExecRunner(), nil
+	}
+
+	if driver.IsKIC(h.Driver.DriverName()) {
+		return command.NewKICRunner(h.Name, h.Driver.DriverName()), nil
 	}
 	client, err := sshutil.NewSSHClient(h.Driver)
 	if err != nil {
@@ -163,9 +167,11 @@ func CommandRunner(h *host.Host) (command.Runner, error) {
 
 // Create creates the host
 func (api *LocalClient) Create(h *host.Host) error {
-	if def, err := registry.Driver(h.DriverName); err != nil {
-		return err
-	} else if !def.Builtin || def.DriverCreator == nil {
+	def := registry.Driver(h.DriverName)
+	if def.Empty() {
+		return fmt.Errorf("driver %q does not exist", h.DriverName)
+	}
+	if def.Init == nil {
 		return api.legacyClient.Create(h)
 	}
 
@@ -194,7 +200,7 @@ func (api *LocalClient) Create(h *host.Host) error {
 		{
 			"waiting",
 			func() error {
-				if h.Driver.DriverName() == constants.DriverNone {
+				if driver.BareMetal(h.Driver.DriverName()) {
 					return nil
 				}
 				return mcnutils.WaitFor(drivers.MachineInState(h.Driver, state.Running))
@@ -203,10 +209,15 @@ func (api *LocalClient) Create(h *host.Host) error {
 		{
 			"provisioning",
 			func() error {
-				if h.Driver.DriverName() == constants.DriverNone {
+				if driver.BareMetal(h.Driver.DriverName()) {
 					return nil
 				}
-				pv := provision.NewBuildrootProvisioner(h.Driver)
+				var pv lib_provision.Provisioner
+				if driver.IsKIC(h.Driver.DriverName()) {
+					pv = provision.NewUbuntuProvisioner(h.Driver)
+				} else {
+					pv = provision.NewBuildrootProvisioner(h.Driver)
+				}
 				return pv.Provision(*h.HostOptions.SwarmOptions, *h.HostOptions.AuthOptions, *h.HostOptions.EngineOptions)
 			},
 		},
@@ -270,13 +281,10 @@ func (cg *CertGenerator) ValidateCertificate(addr string, authOptions *auth.Opti
 	return true, nil
 }
 
-func registerDriver(driverName string) {
-	def, err := registry.Driver(driverName)
-	if err != nil {
-		if err == registry.ErrDriverNotFound {
-			exit.UsageT("unsupported driver: {{.name}}", out.V{"name": driverName})
-		}
-		exit.WithError("error getting driver", err)
+func registerDriver(drvName string) {
+	def := registry.Driver(drvName)
+	if def.Empty() {
+		exit.UsageT("unsupported or missing driver: {{.name}}", out.V{"name": drvName})
 	}
-	plugin.RegisterDriver(def.DriverCreator())
+	plugin.RegisterDriver(def.Init())
 }

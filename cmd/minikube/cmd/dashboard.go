@@ -32,10 +32,12 @@ import (
 	"github.com/pkg/browser"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	configcmd "k8s.io/minikube/cmd/minikube/cmd/config"
+	"github.com/spf13/viper"
+	pkgaddons "k8s.io/minikube/pkg/addons"
 	"k8s.io/minikube/pkg/minikube/assets"
-	"k8s.io/minikube/pkg/minikube/cluster"
+	"k8s.io/minikube/pkg/minikube/config"
 	pkg_config "k8s.io/minikube/pkg/minikube/config"
+	"k8s.io/minikube/pkg/minikube/driver"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/machine"
 	"k8s.io/minikube/pkg/minikube/out"
@@ -57,9 +59,15 @@ var dashboardCmd = &cobra.Command{
 	Short: "Access the kubernetes dashboard running within the minikube cluster",
 	Long:  `Access the kubernetes dashboard running within the minikube cluster`,
 	Run: func(cmd *cobra.Command, args []string) {
-		cc, err := pkg_config.Load()
-		if err != nil && !os.IsNotExist(err) {
+		profileName := viper.GetString(pkg_config.ProfileName)
+		cc, err := pkg_config.Load(profileName)
+		if err != nil && !pkg_config.IsNotExist(err) {
 			exit.WithError("Error loading profile config", err)
+		}
+
+		if err != nil {
+			out.ErrT(out.Meh, `"{{.name}}" profile does not exist`, out.V{"name": profileName})
+			os.Exit(1)
 		}
 
 		api, err := machine.NewAPIClient()
@@ -74,18 +82,26 @@ var dashboardCmd = &cobra.Command{
 			exit.WithError("Error getting client", err)
 		}
 
-		if _, err = api.Load(pkg_config.GetMachineName()); err != nil {
+		cp, err := config.PrimaryControlPlane(cc)
+		if err != nil {
+			exit.WithError("Error getting primary control plane", err)
+		}
+
+		machineName := driver.MachineName(*cc, cp)
+		if _, err = api.Load(machineName); err != nil {
 			switch err := errors.Cause(err).(type) {
 			case mcnerror.ErrHostDoesNotExist:
-				exit.WithCodeT(exit.Unavailable, "{{.name}} cluster does not exist", out.V{"name": pkg_config.GetMachineName()})
+				exit.WithCodeT(exit.Unavailable, "{{.name}} cluster does not exist", out.V{"name": cc.Name})
 			default:
 				exit.WithError("Error getting cluster", err)
 			}
 		}
 
-		err = proxy.ExcludeIP(cc.KubernetesConfig.NodeIP) // to be used for http get calls
-		if err != nil {
-			glog.Errorf("Error excluding IP from proxy: %s", err)
+		for _, n := range cc.Nodes {
+			err = proxy.ExcludeIP(n.IP) // to be used for http get calls
+			if err != nil {
+				glog.Errorf("Error excluding IP from proxy: %s", err)
+			}
 		}
 
 		kubectl, err := exec.LookPath("kubectl")
@@ -93,16 +109,18 @@ var dashboardCmd = &cobra.Command{
 			exit.WithCodeT(exit.NoInput, "kubectl not found in PATH, but is required for the dashboard. Installation guide: https://kubernetes.io/docs/tasks/tools/install-kubectl/")
 		}
 
-		cluster.EnsureMinikubeRunningOrExit(api, 1)
+		if !machine.IsRunning(api, machineName) {
+			os.Exit(1)
+		}
 
 		// Check dashboard status before enabling it
 		dashboardAddon := assets.Addons["dashboard"]
-		dashboardStatus, _ := dashboardAddon.IsEnabled()
+		dashboardStatus, _ := dashboardAddon.IsEnabled(profileName)
 		if !dashboardStatus {
 			// Send status messages to stderr for folks re-using this output.
 			out.ErrT(out.Enabling, "Enabling dashboard ...")
 			// Enable the dashboard add-on
-			err = configcmd.Set("dashboard", "true")
+			err = pkgaddons.Set("dashboard", "true", profileName)
 			if err != nil {
 				exit.WithError("Unable to enable dashboard", err)
 			}
@@ -117,7 +135,7 @@ var dashboardCmd = &cobra.Command{
 		}
 
 		out.ErrT(out.Launch, "Launching proxy ...")
-		p, hostPort, err := kubectlProxy(kubectl)
+		p, hostPort, err := kubectlProxy(kubectl, machineName)
 		if err != nil {
 			exit.WithError("kubectl proxy", err)
 		}
@@ -151,11 +169,10 @@ var dashboardCmd = &cobra.Command{
 }
 
 // kubectlProxy runs "kubectl proxy", returning host:port
-func kubectlProxy(path string) (*exec.Cmd, string, error) {
+func kubectlProxy(path string, machineName string) (*exec.Cmd, string, error) {
 	// port=0 picks a random system port
-	// pkg_config.GetMachineName() respects the -p (profile) flag
 
-	cmd := exec.Command(path, "--context", pkg_config.GetMachineName(), "proxy", "--port=0")
+	cmd := exec.Command(path, "--context", machineName, "proxy", "--port=0")
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

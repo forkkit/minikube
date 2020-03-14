@@ -4,7 +4,7 @@
 #
 ################################################################################
 
-DOCKER_BIN_VERSION = 18.09.9
+DOCKER_BIN_VERSION = 19.03.8
 DOCKER_BIN_SITE = https://download.docker.com/linux/static/stable/x86_64
 DOCKER_BIN_SOURCE = docker-$(DOCKER_BIN_VERSION).tgz
 
@@ -28,8 +28,18 @@ define DOCKER_BIN_INSTALL_TARGET_CMDS
 		$(TARGET_DIR)/bin/dockerd
 
 	$(INSTALL) -D -m 0755 \
+		$(@D)/docker-init \
+		$(TARGET_DIR)/bin/docker-init
+
+	$(INSTALL) -D -m 0755 \
 		$(@D)/docker-proxy \
 		$(TARGET_DIR)/bin/docker-proxy
+
+	# https://kubernetes.io/docs/setup/production-environment/container-runtimes/#docker
+
+	$(INSTALL) -Dm644 \
+		$(DOCKER_BIN_PKGDIR)/daemon.json \
+		$(TARGET_DIR)/etc/docker/daemon.json
 endef
 
 define DOCKER_BIN_INSTALL_INIT_SYSTEMD
@@ -38,7 +48,7 @@ define DOCKER_BIN_INSTALL_INIT_SYSTEMD
 		$(TARGET_DIR)/usr/lib/systemd/system/docker.socket
 
 	$(INSTALL) -D -m 644 \
-		$(BR2_EXTERNAL_MINIKUBE_PATH)/package/docker-bin/forward.conf \
+		$(DOCKER_BIN_PKGDIR)/forward.conf \
 		$(TARGET_DIR)/etc/sysctl.d/forward.conf
 endef
 

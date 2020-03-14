@@ -23,16 +23,18 @@ import (
 	"fmt"
 	"os/exec"
 	"testing"
-	"time"
+
+	"k8s.io/minikube/pkg/minikube/vmpath"
 )
 
 func TestGuestEnvironment(t *testing.T) {
-	MaybeSlowParallel(t)
+	MaybeParallel(t)
+
 	profile := UniqueProfileName("guest")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), Minutes(15))
 	defer CleanupWithLogs(t, profile, cancel)
 
-	args := append([]string{"start", "-p", profile, "--wait=false"}, StartArgs()...)
+	args := append([]string{"start", "-p", profile, "--install-addons=false", "--memory=1800", "--wait=false"}, StartArgs()...)
 	rr, err := Run(t, exec.CommandContext(ctx, Target(), args...))
 	if err != nil {
 		t.Errorf("%s failed: %v", rr.Args, err)
@@ -58,7 +60,7 @@ func TestGuestEnvironment(t *testing.T) {
 			"/var/lib/docker",
 			"/var/lib/cni",
 			"/var/lib/kubelet",
-			"/var/lib/minikube",
+			vmpath.GuestPersistentDir,
 			"/var/lib/toolbox",
 			"/var/lib/boot2docker",
 		} {

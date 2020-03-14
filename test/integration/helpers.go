@@ -30,20 +30,15 @@ import (
 	"io/ioutil"
 	"os/exec"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/docker/machine/libmachine/state"
 	"github.com/shirou/gopsutil/process"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/minikube/pkg/kapi"
-)
-
-var (
-	antiRaceCounter = 0
-	antiRaceMutex   = &sync.Mutex{}
 )
 
 // RunResult stores the result of an cmd.Run call
@@ -175,16 +170,55 @@ func Cleanup(t *testing.T, profile string, cancel context.CancelFunc) {
 // CleanupWithLogs cleans up after a test run, fetching logs and deleting the profile
 func CleanupWithLogs(t *testing.T, profile string, cancel context.CancelFunc) {
 	t.Helper()
-	if t.Failed() && *postMortemLogs {
-		t.Logf("%s failed, collecting logs ...", t.Name())
-		rr, err := Run(t, exec.Command(Target(), "-p", profile, "logs", "-n", "100"))
-		if err != nil {
-			t.Logf("failed logs error: %v", err)
-		}
-		t.Logf("%s logs: %s", t.Name(), rr.Stdout)
-		t.Logf("Sorry that %s failed :(", t.Name())
+	if !t.Failed() {
+		Cleanup(t, profile, cancel)
+		return
+	}
+
+	t.Logf("*** %s FAILED at %s", t.Name(), time.Now())
+
+	if *postMortemLogs {
+		clusterLogs(t, profile)
 	}
 	Cleanup(t, profile, cancel)
+}
+
+// clusterLogs shows logs for debugging a failed cluster
+func clusterLogs(t *testing.T, profile string) {
+	st := Status(context.Background(), t, Target(), profile, "Host")
+	if st != state.Running.String() {
+		t.Logf("%q host is not running, skipping log retrieval (state=%q)", profile, st)
+		return
+	}
+
+	t.Logf("<<< %s FAILED: start of post-mortem logs <<<", t.Name())
+	rr, err := Run(t, exec.Command(Target(), "-p", profile, "logs", "--problems"))
+	if err != nil {
+		t.Logf("failed logs error: %v", err)
+		return
+	}
+	t.Logf("%s logs: %s", t.Name(), rr.Stdout)
+
+	st = Status(context.Background(), t, Target(), profile, "APIServer")
+	if st != state.Running.String() {
+		t.Logf("%q apiserver is not running, skipping kubectl commands (state=%q)", profile, st)
+		return
+	}
+
+	rr, rerr := Run(t, exec.Command("kubectl", "--context", profile, "get", "po", "-A", "--show-labels"))
+	if rerr != nil {
+		t.Logf("%s: %v", rr.Command(), rerr)
+		return
+	}
+	t.Logf("(dbg) %s:\n%s", rr.Command(), rr.Stdout)
+
+	rr, err = Run(t, exec.Command("kubectl", "--context", profile, "describe", "node"))
+	if err != nil {
+		t.Logf("%s: %v", rr.Command(), err)
+	} else {
+		t.Logf("(dbg) %s:\n%s", rr.Command(), rr.Stdout)
+	}
+	t.Logf("<<< %s FAILED: end of post-mortem logs <<<", t.Name())
 }
 
 // podStatusMsg returns a human-readable pod status, for generating debug status
@@ -223,13 +257,14 @@ func PodWait(ctx context.Context, t *testing.T, profile string, ns string, selec
 	lastMsg := ""
 
 	start := time.Now()
-	t.Logf("(dbg) waiting for pods with labels %q in namespace %q ...", selector, ns)
+	t.Logf("(dbg) %s: waiting %s for pods matching %q in namespace %q ...", t.Name(), timeout, selector, ns)
 	f := func() (bool, error) {
 		pods, err := client.CoreV1().Pods(ns).List(listOpts)
 		if err != nil {
-			t.Logf("Pod(%s).List(%v) returned error: %v", ns, selector, err)
-			// Don't bother to retry: something is very wrong.
-			return true, err
+			t.Logf("%s: WARNING: pod list for %q %q returned: %v", t.Name(), ns, selector, err)
+			// Don't return the error upwards so that this is retried, in case the apiserver is rescheduled
+			podStart = time.Time{}
+			return false, nil
 		}
 		if len(pods.Items) == 0 {
 			podStart = time.Time{}
@@ -251,7 +286,7 @@ func PodWait(ctx context.Context, t *testing.T, profile string, ns string, selec
 			// Long-running process state
 			if pod.Status.Phase != core.PodRunning {
 				if !podStart.IsZero() {
-					t.Logf("WARNING: %s was running %s ago - may be unstable", selector, time.Since(podStart))
+					t.Logf("%s: WARNING: %s was running %s ago - may be unstable", t.Name(), selector, time.Since(podStart))
 				}
 				podStart = time.Time{}
 				return false, nil
@@ -268,31 +303,43 @@ func PodWait(ctx context.Context, t *testing.T, profile string, ns string, selec
 		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, timeout, f)
+	err = wait.PollImmediate(1*time.Second, timeout, f)
 	names := []string{}
 	for n := range foundNames {
 		names = append(names, n)
 	}
 
 	if err == nil {
-		t.Logf("(dbg) pods %s up and healthy within %s", selector, time.Since(start))
+		t.Logf("(dbg) %s: %s healthy within %s", t.Name(), selector, time.Since(start))
 		return names, nil
 	}
 
-	t.Logf("pod %q failed to start: %v", selector, err)
+	t.Logf("***** %s: pod %q failed to start within %s: %v ****", t.Name(), selector, timeout, err)
 	showPodLogs(ctx, t, profile, ns, names)
 	return names, fmt.Errorf("%s: %v", fmt.Sprintf("%s within %s", selector, timeout), err)
 }
 
+// Status returns a minikube component status as a string
+func Status(ctx context.Context, t *testing.T, path string, profile string, key string) string {
+	t.Helper()
+	// Reminder of useful keys: "Host", "Kubelet", "APIServer"
+	rr, err := Run(t, exec.CommandContext(ctx, path, "status", fmt.Sprintf("--format={{.%s}}", key), "-p", profile))
+	if err != nil {
+		t.Logf("status error: %v (may be ok)", err)
+	}
+	return strings.TrimSpace(rr.Stdout.String())
+}
+
 // showPodLogs logs debug info for pods
 func showPodLogs(ctx context.Context, t *testing.T, profile string, ns string, names []string) {
-	rr, rerr := Run(t, exec.CommandContext(ctx, "kubectl", "--context", profile, "get", "po", "-A", "--show-labels"))
-	if rerr != nil {
-		t.Logf("%s: %v", rr.Command(), rerr)
-		// return now, because kubectl is hosed
+	t.Helper()
+	st := Status(context.Background(), t, Target(), profile, "APIServer")
+	if st != state.Running.String() {
+		t.Logf("%q apiserver is not running, skipping kubectl commands (state=%q)", profile, st)
 		return
 	}
-	t.Logf("(dbg) %s:\n%s", rr.Command(), rr.Stdout)
+
+	t.Logf("%s: showing logs for failed pods as of %s", t.Name(), time.Now())
 
 	for _, name := range names {
 		rr, err := Run(t, exec.CommandContext(ctx, "kubectl", "--context", profile, "describe", "po", name, "-n", ns))
@@ -311,43 +358,12 @@ func showPodLogs(ctx context.Context, t *testing.T, profile string, ns string, n
 	}
 }
 
-// Status returns the minikube cluster status as a string
-func Status(ctx context.Context, t *testing.T, path string, profile string) string {
-	t.Helper()
-	rr, err := Run(t, exec.CommandContext(ctx, path, "status", "--format={{.Host}}", "-p", profile))
-	if err != nil {
-		t.Logf("status error: %v (may be ok)", err)
-	}
-	return strings.TrimSpace(rr.Stdout.String())
-}
-
 // MaybeParallel sets that the test should run in parallel
 func MaybeParallel(t *testing.T) {
 	t.Helper()
 	// TODO: Allow paralellized tests on "none" that do not require independent clusters
 	if NoneDriver() {
 		return
-	}
-	t.Parallel()
-}
-
-// MaybeSlowParallel is a terrible workaround for tests which start clusters in a race-filled world
-// TODO: Try removing this hack once certificates are deployed per-profile
-func MaybeSlowParallel(t *testing.T) {
-	// NoneDriver shouldn't parallelize "minikube start"
-	if NoneDriver() {
-		return
-	}
-
-	antiRaceMutex.Lock()
-	antiRaceCounter++
-	antiRaceMutex.Unlock()
-
-	if antiRaceCounter > 0 {
-		// Slow enough to offset start, but not slow to be a major source of delay
-		penalty := time.Duration(5*antiRaceCounter) * time.Second
-		t.Logf("MaybeSlowParallel: Sleeping %s to avoid start race ...", penalty)
-		time.Sleep(penalty)
 	}
 	t.Parallel()
 }

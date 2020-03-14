@@ -18,14 +18,14 @@ package kubeconfig
 
 import (
 	"io/ioutil"
+	"path/filepath"
 	"sync/atomic"
-	"time"
 
 	"github.com/golang/glog"
-	"github.com/juju/clock"
 	"github.com/juju/mutex"
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/minikube/pkg/util/lock"
 )
 
 // Settings is the minikubes settings for kubeconfig
@@ -66,7 +66,7 @@ func (k *Settings) filePath() string {
 	return k.kubeConfigFile.Load().(string)
 }
 
-// Populate populates an api.Config object with values from *Settings
+// PopulateFromSettings populates an api.Config object with values from *Settings
 func PopulateFromSettings(cfg *Settings, apiCfg *api.Config) error {
 	var err error
 	clusterName := cfg.ClusterName
@@ -115,12 +115,11 @@ func PopulateFromSettings(cfg *Settings, apiCfg *api.Config) error {
 	return nil
 }
 
-// update reads config from disk, adds the minikube settings, and writes it back.
+// Update reads config from disk, adds the minikube settings, and writes it back.
 // activeContext is true when minikube is the CurrentContext
 // If no CurrentContext is set, the given name will be used.
 func Update(kcs *Settings) error {
-	// Add a lock around both the read, update, and write operations
-	spec := mutex.Spec{Name: "kubeconfigUpdate", Clock: clock.WallClock, Delay: 10 * time.Second}
+	spec := lock.PathMutexSpec(filepath.Join(kcs.filePath(), "settings.Update"))
 	glog.Infof("acquiring lock: %+v", spec)
 	releaser, err := mutex.Acquire(spec)
 	if err != nil {

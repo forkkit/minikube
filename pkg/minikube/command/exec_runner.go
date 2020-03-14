@@ -18,12 +18,14 @@ package command
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
@@ -33,50 +35,55 @@ import (
 // ExecRunner runs commands using the os/exec package.
 //
 // It implements the CommandRunner interface.
-type ExecRunner struct{}
-
-// Run starts the specified command in a bash shell and waits for it to complete.
-func (*ExecRunner) Run(cmd string) error {
-	glog.Infoln("Run:", cmd)
-	c := exec.Command("/bin/bash", "-c", cmd)
-	if err := c.Run(); err != nil {
-		return errors.Wrapf(err, "running command: %s", cmd)
-	}
-	return nil
+type execRunner struct {
 }
 
-// CombinedOutputTo runs the command and stores both command
-// output and error to out.
-func (*ExecRunner) CombinedOutputTo(cmd string, out io.Writer) error {
-	glog.Infoln("Run with output:", cmd)
-	c := exec.Command("/bin/bash", "-c", cmd)
-	c.Stdout = out
-	c.Stderr = out
-	err := c.Run()
-	if err != nil {
-		return errors.Wrapf(err, "running command: %s\n.", cmd)
-	}
-
-	return nil
+// NewExecRunner returns a kicRunner implementor of runner which runs cmds inside a container
+func NewExecRunner() Runner {
+	return &execRunner{}
 }
 
-// CombinedOutput runs the command  in a bash shell and returns its
-// combined standard output and standard error.
-func (e *ExecRunner) CombinedOutput(cmd string) (string, error) {
-	var b bytes.Buffer
-	err := e.CombinedOutputTo(cmd, &b)
-	if err != nil {
-		return "", errors.Wrapf(err, "running command: %s\n output: %s", cmd, b.Bytes())
+// RunCmd implements the Command Runner interface to run a exec.Cmd object
+func (*execRunner) RunCmd(cmd *exec.Cmd) (*RunResult, error) {
+	rr := &RunResult{Args: cmd.Args}
+	var outb, errb io.Writer
+	if cmd.Stdout == nil {
+		var so bytes.Buffer
+		outb = io.MultiWriter(&so, &rr.Stdout)
+	} else {
+		outb = io.MultiWriter(cmd.Stdout, &rr.Stdout)
 	}
-	return b.String(), nil
 
+	if cmd.Stderr == nil {
+		var se bytes.Buffer
+		errb = io.MultiWriter(&se, &rr.Stderr)
+	} else {
+		errb = io.MultiWriter(cmd.Stderr, &rr.Stderr)
+	}
+
+	cmd.Stdout = outb
+	cmd.Stderr = errb
+
+	start := time.Now()
+	err := cmd.Run()
+	elapsed := time.Since(start)
+
+	if exitError, ok := err.(*exec.ExitError); ok {
+		rr.ExitCode = exitError.ExitCode()
+	}
+	// Decrease log spam
+	if elapsed > (1 * time.Second) {
+		glog.Infof("Completed: %s: (%s)", rr.Command(), elapsed)
+	}
+	if err == nil {
+		return rr, nil
+	}
+
+	return rr, fmt.Errorf("%s: %v\nstdout:\n%s\nstderr:\n%s", rr.Command(), err, rr.Stdout.String(), rr.Stderr.String())
 }
 
 // Copy copies a file and its permissions
-func (*ExecRunner) Copy(f assets.CopyableFile) error {
-	if err := os.MkdirAll(f.GetTargetDir(), os.ModePerm); err != nil {
-		return errors.Wrapf(err, "error making dirs for %s", f.GetTargetDir())
-	}
+func (*execRunner) Copy(f assets.CopyableFile) error {
 	targetPath := path.Join(f.GetTargetDir(), f.GetTargetName())
 	if _, err := os.Stat(targetPath); err == nil {
 		if err := os.Remove(targetPath); err != nil {
@@ -105,7 +112,7 @@ do you have the correct permissions?`,
 }
 
 // Remove removes a file
-func (e *ExecRunner) Remove(f assets.CopyableFile) error {
+func (*execRunner) Remove(f assets.CopyableFile) error {
 	targetPath := filepath.Join(f.GetTargetDir(), f.GetTargetName())
 	return os.Remove(targetPath)
 }

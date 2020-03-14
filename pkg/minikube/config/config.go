@@ -18,14 +18,14 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 
-	"github.com/spf13/viper"
-	"k8s.io/minikube/pkg/minikube/constants"
+	"github.com/pkg/errors"
+
+	"k8s.io/minikube/pkg/minikube/localpath"
 )
 
 const (
@@ -41,8 +41,8 @@ const (
 	WantKubectlDownloadMsg = "WantKubectlDownloadMsg"
 	// WantNoneDriverWarning is the key for WantNoneDriverWarning
 	WantNoneDriverWarning = "WantNoneDriverWarning"
-	// MachineProfile is the key for MachineProfile
-	MachineProfile = "profile"
+	// ProfileName represents the key for the global profile parameter
+	ProfileName = "profile"
 	// ShowDriverDeprecationNotification is the key for ShowDriverDeprecationNotification
 	ShowDriverDeprecationNotification = "ShowDriverDeprecationNotification"
 	// ShowBootstrapperDeprecationNotification is the key for ShowBootstrapperDeprecationNotification
@@ -54,12 +54,29 @@ var (
 	ErrKeyNotFound = errors.New("specified key could not be found in config")
 )
 
+// ErrNotExist is the error returned when a config does not exist
+type ErrNotExist struct {
+	s string
+}
+
+func (e *ErrNotExist) Error() string {
+	return e.s
+}
+
+// IsNotExist returns whether the error means a nonexistent configuration
+func IsNotExist(err error) bool {
+	if _, ok := err.(*ErrNotExist); ok {
+		return true
+	}
+	return false
+}
+
 // MinikubeConfig represents minikube config
 type MinikubeConfig map[string]interface{}
 
 // Get gets a named value from config
 func Get(name string) (string, error) {
-	m, err := ReadConfig(constants.ConfigFile)
+	m, err := ReadConfig(localpath.ConfigFile())
 	if err != nil {
 		return "", err
 	}
@@ -94,13 +111,13 @@ func ReadConfig(configFile string) (MinikubeConfig, error) {
 		if os.IsNotExist(err) {
 			return make(map[string]interface{}), nil
 		}
-		return nil, fmt.Errorf("open %s: %v", constants.ConfigFile, err)
+		return nil, fmt.Errorf("open %s: %v", localpath.ConfigFile(), err)
 	}
 	defer f.Close()
 
 	m, err := decode(f)
 	if err != nil {
-		return nil, fmt.Errorf("decode %s: %v", constants.ConfigFile, err)
+		return nil, fmt.Errorf("decode %s: %v", localpath.ConfigFile(), err)
 	}
 
 	return m, nil
@@ -123,23 +140,20 @@ func encode(w io.Writer, m MinikubeConfig) error {
 	return err
 }
 
-// GetMachineName gets the machine name for the VM
-func GetMachineName() string {
-	// REFACTOR NECESSARY: This function should not rely on globals.
-	if viper.GetString(MachineProfile) == "" {
-		return constants.DefaultMachineName
-	}
-	return viper.GetString(MachineProfile)
+// Load loads the kubernetes and machine config for the current machine
+func Load(profile string) (*ClusterConfig, error) {
+	return DefaultLoader.LoadConfigFromFile(profile)
 }
 
-// Load loads the kubernetes and machine config for the current machine
-func Load() (*Config, error) {
-	return DefaultLoader.LoadConfigFromFile(GetMachineName())
+// Write writes the kubernetes and machine config for the current machine
+func Write(profile string, cc *ClusterConfig) error {
+	return DefaultLoader.WriteConfigToFile(profile, cc)
 }
 
 // Loader loads the kubernetes and machine config based on the machine profile name
 type Loader interface {
-	LoadConfigFromFile(profile string, miniHome ...string) (*Config, error)
+	LoadConfigFromFile(profile string, miniHome ...string) (*ClusterConfig, error)
+	WriteConfigToFile(profileName string, cc *ClusterConfig, miniHome ...string) error
 }
 
 type simpleConfigLoader struct{}
@@ -147,22 +161,35 @@ type simpleConfigLoader struct{}
 // DefaultLoader is the default config loader
 var DefaultLoader Loader = &simpleConfigLoader{}
 
-func (c *simpleConfigLoader) LoadConfigFromFile(profileName string, miniHome ...string) (*Config, error) {
-	var cc Config
+func (c *simpleConfigLoader) LoadConfigFromFile(profileName string, miniHome ...string) (*ClusterConfig, error) {
+	var cc ClusterConfig
 	// Move to profile package
 	path := profileFilePath(profileName, miniHome...)
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, err
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, &ErrNotExist{fmt.Sprintf("cluster %q does not exist", profileName)}
+		}
+		return nil, errors.Wrap(err, "stat")
 	}
 
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "read")
 	}
 
 	if err := json.Unmarshal(data, &cc); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "unmarshal")
 	}
 	return &cc, nil
+}
+
+func (c *simpleConfigLoader) WriteConfigToFile(profileName string, cc *ClusterConfig, miniHome ...string) error {
+	// Move to profile package
+	path := profileFilePath(profileName, miniHome...)
+	contents, err := json.MarshalIndent(cc, "", "	")
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(path, contents, 0644)
 }

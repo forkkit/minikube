@@ -4,12 +4,12 @@ linkTitle: "service"
 weight: 1
 date: 2019-08-01
 description: >
-  Gets the kubernetes URL(s) for the specified service in your local cluster
+  Gets the Kubernetes URL(s) for the specified service in your local cluster
 ---
 
 ### Overview
 
-Gets the kubernetes URL(s) for the specified service in your local cluster. In the case of multiple URLs they will be printed one at a time.
+Gets the Kubernetes URL(s) for the specified service in your local cluster. In the case of multiple URLs they will be printed one at a time.
 
 ### Usage
 
@@ -27,7 +27,7 @@ minikube service [flags] SERVICE
       --format string      Format to output service URL in. This format will be applied to each url individually and they will be printed one at a time. (default "http://{{.IP}}:{{.Port}}")
   -h, --help               help for service
       --https              Open the service URL with https instead of http
-      --interval int       The time interval for each check that wait performs in seconds (default 6)
+      --interval int       The initial time interval for each check that wait performs in seconds (default 6)
   -n, --namespace string   The service namespace (default "default")
       --url                Display the kubernetes service URL in the CLI instead of opening it in the default browser
       --wait int           Amount of time to wait for a service in seconds (default 20)

@@ -18,9 +18,9 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"k8s.io/minikube/pkg/minikube/cluster"
 	"k8s.io/minikube/pkg/minikube/config"
-	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/kubeconfig"
 	"k8s.io/minikube/pkg/minikube/machine"
@@ -39,12 +39,12 @@ var updateContextCmd = &cobra.Command{
 			exit.WithError("Error getting client", err)
 		}
 		defer api.Close()
-		machineName := config.GetMachineName()
+		machineName := viper.GetString(config.ProfileName)
 		ip, err := cluster.GetHostDriverIP(api, machineName)
 		if err != nil {
 			exit.WithError("Error host driver ip status", err)
 		}
-		updated, err := kubeconfig.UpdateIP(ip, constants.KubeconfigPath, machineName)
+		updated, err := kubeconfig.UpdateIP(ip, machineName, kubeconfig.PathFromEnv())
 		if err != nil {
 			exit.WithError("update config", err)
 		}

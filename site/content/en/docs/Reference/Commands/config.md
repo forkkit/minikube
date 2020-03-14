@@ -9,11 +9,12 @@ description: >
 
 ### Overview
 
-config modifies minikube config files using subcommands like "minikube config set vm-driver kvm"
+config modifies minikube config files using subcommands like "minikube config set driver kvm"
 
 Configurable fields: 
 
- * vm-driver
+ * driver
+ * container-runtime
  * feature-gates
  * v
  * cpus
@@ -33,27 +34,13 @@ Configurable fields:
  * bootstrapper
  * ShowDriverDeprecationNotification
  * ShowBootstrapperDeprecationNotification
- * dashboard
- * addon-manager
- * default-storageclass
- * heapster
- * efk
- * ingress
- * registry
- * registry-creds
- * freshpod
- * default-storageclass
- * storage-provisioner
- * storage-provisioner-gluster
- * metrics-server
- * nvidia-driver-installer
- * nvidia-gpu-device-plugin
- * logviewer
- * gvisor
+ * insecure-registry
  * hyperv-virtual-switch
  * disable-driver-mounts
  * cache
  * embed-certs
+ * native-ssh
+
 
 ### subcommands
 

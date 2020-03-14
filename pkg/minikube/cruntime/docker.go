@@ -19,14 +19,36 @@ package cruntime
 import (
 	"fmt"
 	"os/exec"
+	"path"
 	"strings"
+	"time"
 
 	"github.com/golang/glog"
+	"github.com/pkg/errors"
+	"k8s.io/minikube/pkg/minikube/assets"
+	"k8s.io/minikube/pkg/minikube/bootstrapper/images"
+	"k8s.io/minikube/pkg/minikube/command"
+	"k8s.io/minikube/pkg/minikube/config"
+	"k8s.io/minikube/pkg/minikube/docker"
+	"k8s.io/minikube/pkg/minikube/download"
 	"k8s.io/minikube/pkg/minikube/out"
 )
 
 // KubernetesContainerPrefix is the prefix of each kubernetes container
 const KubernetesContainerPrefix = "k8s_"
+
+type ErrISOFeature struct {
+	missing string
+}
+
+func NewErrISOFeature(missing string) *ErrISOFeature {
+	return &ErrISOFeature{
+		missing: missing,
+	}
+}
+func (e *ErrISOFeature) Error() string {
+	return e.missing
+}
 
 // Docker contains Docker runtime state
 type Docker struct {
@@ -47,12 +69,12 @@ func (r *Docker) Style() out.StyleEnum {
 // Version retrieves the current version of this runtime
 func (r *Docker) Version() (string, error) {
 	// Note: the server daemon has to be running, for this call to return successfully
-	ver, err := r.Runner.CombinedOutput("docker version --format '{{.Server.Version}}'")
+	c := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
+	rr, err := r.Runner.RunCmd(c)
 	if err != nil {
 		return "", err
 	}
-
-	return strings.Split(ver, "\n")[0], nil
+	return strings.Split(rr.Stdout.String(), "\n")[0], nil
 }
 
 // SocketPath returns the path to the socket file for Docker
@@ -73,7 +95,8 @@ func (r *Docker) Available() error {
 
 // Active returns if docker is active on the host
 func (r *Docker) Active() bool {
-	err := r.Runner.Run("systemctl is-active --quiet service docker")
+	c := exec.Command("sudo", "systemctl", "is-active", "--quiet", "service", "docker")
+	_, err := r.Runner.RunCmd(c)
 	return err == nil
 }
 
@@ -84,18 +107,65 @@ func (r *Docker) Enable(disOthers bool) error {
 			glog.Warningf("disableOthers: %v", err)
 		}
 	}
-	return r.Runner.Run("sudo systemctl start docker")
+	c := exec.Command("sudo", "systemctl", "start", "docker")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "enable docker.")
+	}
+	return nil
+}
+
+// Restart restarts Docker on a host
+func (r *Docker) Restart() error {
+	c := exec.Command("sudo", "systemctl", "restart", "docker")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "restarting docker.")
+	}
+	return nil
 }
 
 // Disable idempotently disables Docker on a host
 func (r *Docker) Disable() error {
-	return r.Runner.Run("sudo systemctl stop docker docker.socket")
+	c := exec.Command("sudo", "systemctl", "stop", "docker", "docker.socket")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "disable docker")
+	}
+	return nil
+}
+
+// ImageExists checks if an image exists
+func (r *Docker) ImageExists(name string, sha string) bool {
+	// expected output looks like [SHA_ALGO:SHA]
+	c := exec.Command("docker", "inspect", "--format", "{{.Id}}", name)
+	rr, err := r.Runner.RunCmd(c)
+	if err != nil {
+		return false
+	}
+	if !strings.Contains(rr.Output(), sha) {
+		return false
+	}
+	return true
 }
 
 // LoadImage loads an image into this runtime
 func (r *Docker) LoadImage(path string) error {
 	glog.Infof("Loading image: %s", path)
-	return r.Runner.Run(fmt.Sprintf("docker load -i %s", path))
+	c := exec.Command("docker", "load", "-i", path)
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "loadimage docker.")
+	}
+	return nil
+
+}
+
+// CGroupDriver returns cgroup driver ("cgroupfs" or "systemd")
+func (r *Docker) CGroupDriver() (string, error) {
+	// Note: the server daemon has to be running, for this call to return successfully
+	c := exec.Command("docker", "info", "--format", "{{.CgroupDriver}}")
+	rr, err := r.Runner.RunCmd(c)
+	if err != nil {
+		return "", err
+	}
+	return strings.Split(rr.Stdout.String(), "\n")[0], nil
 }
 
 // KubeletOptions returns kubelet options for a runtime.
@@ -106,14 +176,30 @@ func (r *Docker) KubeletOptions() map[string]string {
 }
 
 // ListContainers returns a list of containers
-func (r *Docker) ListContainers(filter string) ([]string, error) {
-	filter = KubernetesContainerPrefix + filter
-	content, err := r.Runner.CombinedOutput(fmt.Sprintf(`docker ps -a --filter="name=%s" --format="{{.ID}}"`, filter))
+func (r *Docker) ListContainers(o ListOptions) ([]string, error) {
+	args := []string{"ps"}
+	switch o.State {
+	case All:
+		args = append(args, "-a")
+	case Running:
+		args = append(args, "--filter", "status=running")
+	case Paused:
+		args = append(args, "--filter", "status=paused")
+	}
+
+	nameFilter := KubernetesContainerPrefix + o.Name
+	if len(o.Namespaces) > 0 {
+		// Example result: k8s.*(kube-system|kubernetes-dashboard)
+		nameFilter = fmt.Sprintf("%s.*_(%s)_", nameFilter, strings.Join(o.Namespaces, "|"))
+	}
+
+	args = append(args, fmt.Sprintf("--filter=name=%s", nameFilter), "--format={{.ID}}")
+	rr, err := r.Runner.RunCmd(exec.Command("docker", args...))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "docker")
 	}
 	var ids []string
-	for _, line := range strings.Split(content, "\n") {
+	for _, line := range strings.Split(rr.Stdout.String(), "\n") {
 		if line != "" {
 			ids = append(ids, line)
 		}
@@ -127,7 +213,12 @@ func (r *Docker) KillContainers(ids []string) error {
 		return nil
 	}
 	glog.Infof("Killing containers: %s", ids)
-	return r.Runner.Run(fmt.Sprintf("docker rm -f %s", strings.Join(ids, " ")))
+	args := append([]string{"rm", "-f"}, ids...)
+	c := exec.Command("docker", args...)
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "Killing containers docker.")
+	}
+	return nil
 }
 
 // StopContainers stops a running container based on ID
@@ -136,7 +227,40 @@ func (r *Docker) StopContainers(ids []string) error {
 		return nil
 	}
 	glog.Infof("Stopping containers: %s", ids)
-	return r.Runner.Run(fmt.Sprintf("docker stop %s", strings.Join(ids, " ")))
+	args := append([]string{"stop"}, ids...)
+	c := exec.Command("docker", args...)
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "docker")
+	}
+	return nil
+}
+
+// PauseContainers pauses a running container based on ID
+func (r *Docker) PauseContainers(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	glog.Infof("Pausing containers: %s", ids)
+	args := append([]string{"pause"}, ids...)
+	c := exec.Command("docker", args...)
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "docker")
+	}
+	return nil
+}
+
+// UnpauseContainers unpauses a container based on ID
+func (r *Docker) UnpauseContainers(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	glog.Infof("Unpausing containers: %s", ids)
+	args := append([]string{"unpause"}, ids...)
+	c := exec.Command("docker", args...)
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "docker")
+	}
+	return nil
 }
 
 // ContainerLogCmd returns the command to retrieve the log for a container based on ID
@@ -157,4 +281,91 @@ func (r *Docker) ContainerLogCmd(id string, len int, follow bool) string {
 // SystemLogCmd returns the command to retrieve system logs
 func (r *Docker) SystemLogCmd(len int) string {
 	return fmt.Sprintf("sudo journalctl -u docker -n %d", len)
+}
+
+// Preload preloads docker with k8s images:
+// 1. Copy over the preloaded tarball into the VM
+// 2. Extract the preloaded tarball to the correct directory
+// 3. Remove the tarball within the VM
+func (r *Docker) Preload(cfg config.KubernetesConfig) error {
+	k8sVersion := cfg.KubernetesVersion
+
+	// If images already exist, return
+	images, err := images.Kubeadm(cfg.ImageRepository, k8sVersion)
+	if err != nil {
+		return errors.Wrap(err, "getting images")
+	}
+	if DockerImagesPreloaded(r.Runner, images) {
+		glog.Info("Images already preloaded, skipping extraction")
+		return nil
+	}
+
+	refStore := docker.NewStorage(r.Runner)
+	if err := refStore.Save(); err != nil {
+		glog.Infof("error saving reference store: %v", err)
+	}
+
+	tarballPath := download.TarballPath(k8sVersion)
+	targetDir := "/"
+	targetName := "preloaded.tar.lz4"
+	dest := path.Join(targetDir, targetName)
+
+	c := exec.Command("which", "lz4")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return NewErrISOFeature("lz4")
+	}
+
+	// Copy over tarball into host
+	fa, err := assets.NewFileAsset(tarballPath, targetDir, targetName, "0644")
+	if err != nil {
+		return errors.Wrap(err, "getting file asset")
+	}
+	t := time.Now()
+	if err := r.Runner.Copy(fa); err != nil {
+		return errors.Wrap(err, "copying file")
+	}
+	glog.Infof("Took %f seconds to copy over tarball", time.Since(t).Seconds())
+
+	// extract the tarball to /var in the VM
+	if rr, err := r.Runner.RunCmd(exec.Command("sudo", "tar", "-I", "lz4", "-C", "/var", "-xvf", dest)); err != nil {
+		return errors.Wrapf(err, "extracting tarball: %s", rr.Output())
+	}
+
+	//  remove the tarball in the VM
+	if err := r.Runner.Remove(fa); err != nil {
+		glog.Infof("error removing tarball: %v", err)
+	}
+
+	// save new reference store again
+	if err := refStore.Save(); err != nil {
+		glog.Infof("error saving reference store: %v", err)
+	}
+	// update reference store
+	if err := refStore.Update(); err != nil {
+		glog.Infof("error updating reference store: %v", err)
+	}
+	return r.Restart()
+}
+
+// DockerImagesPreloaded returns true if all images have been preloaded
+func DockerImagesPreloaded(runner command.Runner, images []string) bool {
+	rr, err := runner.RunCmd(exec.Command("docker", "images", "--format", "{{.Repository}}:{{.Tag}}"))
+	if err != nil {
+		return false
+	}
+	preloadedImages := map[string]struct{}{}
+	for _, i := range strings.Split(rr.Stdout.String(), "\n") {
+		preloadedImages[i] = struct{}{}
+	}
+
+	glog.Infof("Got preloaded images: %s", rr.Output())
+
+	// Make sure images == imgs
+	for _, i := range images {
+		if _, ok := preloadedImages[i]; !ok {
+			glog.Infof("%s wasn't preloaded", i)
+			return false
+		}
+	}
+	return true
 }

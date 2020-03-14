@@ -21,9 +21,9 @@ import (
 	"testing"
 )
 
-// TestListProfiles uses a different uses different MINIKUBE_HOME with rest of tests since it relies on file list index
+// TestListProfiles uses a different MINIKUBE_HOME with rest of tests since it relies on file list index
 func TestListProfiles(t *testing.T) {
-	miniDir, err := filepath.Abs("./testdata/.minikube")
+	miniDir, err := filepath.Abs("./testdata/profile/.minikube")
 	if err != nil {
 		t.Errorf("error getting dir path for ./testdata/.minikube : %v", err)
 	}
@@ -34,7 +34,7 @@ func TestListProfiles(t *testing.T) {
 		vmDriver   string
 	}{
 		{0, "p1", "hyperkit"},
-		{1, "p2", "virtualbox"},
+		{1, "p2_newformat", "virtualbox"},
 	}
 
 	// test cases for invalid profiles
@@ -54,8 +54,8 @@ func TestListProfiles(t *testing.T) {
 		if val[tt.index].Name != tt.expectName {
 			t.Errorf("expected %s got %v", tt.expectName, val[tt.index].Name)
 		}
-		if val[tt.index].Config.MachineConfig.VMDriver != tt.vmDriver {
-			t.Errorf("expected %s got %v", tt.vmDriver, val[tt.index].Config.MachineConfig.VMDriver)
+		if val[tt.index].Config.Driver != tt.vmDriver {
+			t.Errorf("expected %s got %v", tt.vmDriver, val[tt.index].Config.Driver)
 		}
 
 	}
@@ -72,6 +72,32 @@ func TestListProfiles(t *testing.T) {
 	}
 }
 
+func TestProfileNameInReservedKeywords(t *testing.T) {
+	var testCases = []struct {
+		name     string
+		expected bool
+	}{
+		{"start", true},
+		{"stop", true},
+		{"status", true},
+		{"delete", true},
+		{"config", true},
+		{"open", true},
+		{"profile", true},
+		{"addons", true},
+		{"cache", true},
+		{"logs", true},
+		{"myprofile", false},
+		{"log", false},
+	}
+	for _, tt := range testCases {
+		got := ProfileNameInReservedKeywords(tt.name)
+		if got != tt.expected {
+			t.Errorf("expected ProfileNameInReservedKeywords(%s)=%t but got %t ", tt.name, tt.expected, got)
+		}
+	}
+}
+
 func TestProfileExists(t *testing.T) {
 	miniDir, err := filepath.Abs("./testdata/.minikube2")
 	if err != nil {
@@ -83,7 +109,7 @@ func TestProfileExists(t *testing.T) {
 		expected bool
 	}{
 		{"p1", true},
-		{"p2", true},
+		{"p2_newformat", true},
 		{"p3_empty", true},
 		{"p4_invalid_file", true},
 		{"p5_partial_config", true},
@@ -138,19 +164,19 @@ func TestCreateProfile(t *testing.T) {
 
 	var testCases = []struct {
 		name      string
-		cfg       *Config
+		cfg       *ClusterConfig
 		expectErr bool
 	}{
-		{"p_empty_config", &Config{}, false},
-		{"p_partial_config", &Config{KubernetesConfig: KubernetesConfig{
+		{"p_empty_config", &ClusterConfig{}, false},
+		{"p_partial_config", &ClusterConfig{KubernetesConfig: KubernetesConfig{
 			ShouldLoadCachedImages: false}}, false},
-		{"p_partial_config2", &Config{MachineConfig: MachineConfig{
-			KeepContext: false}, KubernetesConfig: KubernetesConfig{
-			ShouldLoadCachedImages: false}}, false},
+		{"p_partial_config2", &ClusterConfig{
+			KeepContext: false, KubernetesConfig: KubernetesConfig{
+				ShouldLoadCachedImages: false}}, false},
 	}
 	for _, tc := range testCases {
 		n := tc.name // capturing  loop variable
-		gotErr := CreateProfile(n, tc.cfg, miniDir)
+		gotErr := SaveProfile(n, tc.cfg, miniDir)
 		if gotErr != nil && tc.expectErr == false {
 			t.Errorf("expected CreateEmptyProfile not to error but got err=%v", gotErr)
 		}
@@ -189,6 +215,50 @@ func TestDeleteProfile(t *testing.T) {
 		if gotErr != nil && tc.expectErr == false {
 			t.Errorf("expected CreateEmptyProfile not to error but got err=%v", gotErr)
 		}
+	}
+
+}
+
+func TestGetPrimaryControlPlane(t *testing.T) {
+	miniDir, err := filepath.Abs("./testdata/.minikube2")
+	if err != nil {
+		t.Errorf("error getting dir path for ./testdata/.minikube : %v", err)
+	}
+
+	var tests = []struct {
+		description  string
+		profile      string
+		expectedIP   string
+		expectedPort int
+		expectedName string
+	}{
+		{"old style", "p1", "192.168.64.75", 8443, "minikube"},
+		{"new style", "p2_newformat", "192.168.99.136", 8443, "m01"},
+	}
+
+	for _, tc := range tests {
+		cc, err := DefaultLoader.LoadConfigFromFile(tc.profile, miniDir)
+		if err != nil {
+			t.Fatalf("Failed to load config for %s", tc.description)
+		}
+
+		n, err := PrimaryControlPlane(cc)
+		if err != nil {
+			t.Fatalf("Unexpexted error getting primary control plane: %v", err)
+		}
+
+		if n.Name != tc.expectedName {
+			t.Errorf("Unexpected name. expected: %s, got: %s", tc.expectedName, n.Name)
+		}
+
+		if n.IP != tc.expectedIP {
+			t.Errorf("Unexpected name. expected: %s, got: %s", tc.expectedIP, n.IP)
+		}
+
+		if n.Port != tc.expectedPort {
+			t.Errorf("Unexpected name. expected: %d, got: %d", tc.expectedPort, n.Port)
+		}
+
 	}
 
 }

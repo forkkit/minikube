@@ -4,7 +4,7 @@ linkTitle: "addons"
 weight: 1
 date: 2019-08-01
 description: >
-  Modifies minikube addons files using subcommands like "minikube addons enable heapster"
+  Modifies minikube addons files using subcommands like "minikube addons enable dashboard"
 ---
 
 ## Overview
@@ -39,6 +39,12 @@ Enables the addon w/ADDON_NAME within minikube (example: minikube addons enable 
 minikube addons enable ADDON_NAME [flags]
 ```
 
+or
+
+```
+minikube start --addons ADDON_NAME [flags]
+```
+
 ## minikube addons list
 
 Lists all available minikube addons as well as their current statuses (enabled/disabled)
@@ -46,6 +52,14 @@ Lists all available minikube addons as well as their current statuses (enabled/d
 ```
 minikube addons list [flags]
 ```
+
+### Options
+
+```
+  -h, --help            help for list
+  -o, --output string   minikube addons list --output OUTPUT. json, list (default "list")
+```
+
 ## minikube addons open
 
 Opens the addon w/ADDON_NAME within minikube (example: minikube addons open dashboard). For a list of available addons use: minikube addons list 

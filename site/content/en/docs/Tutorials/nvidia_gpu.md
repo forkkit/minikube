@@ -15,7 +15,7 @@ description: >
 
 ## Using the KVM2 driver
 
-When using NVIDIA GPUs with the kvm2 vm-driver, we passthrough spare GPUs on the
+When using NVIDIA GPUs with the kvm2 driver, we passthrough spare GPUs on the
 host to the minikube VM. Doing so has a few prerequisites:
 
 - You must install the [kvm2 driver](/docs/start/linux/#hypervisor-setup). If you already had
@@ -44,7 +44,7 @@ host to the minikube VM. Doing so has a few prerequisites:
 - Once you reboot the system after doing the above, you should be ready to use
   GPUs with kvm2. Run the following command to start minikube:
   ```shell
-  minikube start --vm-driver kvm2 --kvm-gpu
+  minikube start --driver kvm2 --kvm-gpu
   ```
 
   This command will check if all the above conditions are satisfied and
@@ -78,7 +78,7 @@ are disruptive to the host, so we decided to not do them automatically.
 ## Using the 'none' driver
 
 NOTE: This approach used to expose GPUs here is different than the approach used
-to expose GPUs with `--vm-driver=kvm2`. Please don't mix these instructions.
+to expose GPUs with `--driver=kvm2`. Please don't mix these instructions.
 
 - Install minikube.
 
@@ -88,12 +88,12 @@ to expose GPUs with `--vm-driver=kvm2`. Please don't mix these instructions.
 
 - Start minikube:
   ```shell
-  minikube start --vm-driver=none --apiserver-ips 127.0.0.1 --apiserver-name localhost
+  minikube start --driver=none --apiserver-ips 127.0.0.1 --apiserver-name localhost
   ```
 
 - Install NVIDIA's device plugin:
   ```shell
-  kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v1.10/nvidia-device-plugin.yml
+  kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/master/nvidia-device-plugin.yml
   ```
 
 ## Why does minikube not support NVIDIA GPUs on macOS?
@@ -102,7 +102,7 @@ VM drivers supported by minikube for macOS doesn't support GPU passthrough:
 
 - [mist64/xhyve#108](https://github.com/mist64/xhyve/issues/108)
 - [moby/hyperkit#159](https://github.com/moby/hyperkit/issues/159)
-- [VirtualBox docs](http://www.virtualbox.org/manual/ch09.html#pcipassthrough)
+- [VirtualBox docs](https://www.virtualbox.org/manual/ch09.html#pcipassthrough)
 
 Also:
 
@@ -119,7 +119,7 @@ Also:
 minikube supports Windows host through Hyper-V or VirtualBox.
 
 - VirtualBox doesn't support PCI passthrough for [Windows
-  host](http://www.virtualbox.org/manual/ch09.html#pcipassthrough).
+  host](https://www.virtualbox.org/manual/ch09.html#pcipassthrough).
 
 - Hyper-V supports DDA (discrete device assignment) but [only for Windows Server
   2016](https://docs.microsoft.com/en-us/windows-server/virtualization/hyper-v/plan/plan-for-deploying-devices-using-discrete-device-assignment)

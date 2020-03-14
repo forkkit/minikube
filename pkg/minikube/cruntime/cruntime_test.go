@@ -17,12 +17,17 @@ limitations under the License.
 package cruntime
 
 import (
+	"bytes"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/pkg/errors"
+	"k8s.io/minikube/pkg/minikube/assets"
+	"k8s.io/minikube/pkg/minikube/command"
 )
 
 func TestName(t *testing.T) {
@@ -45,6 +50,60 @@ func TestName(t *testing.T) {
 			got := r.Name()
 			if got != tc.want {
 				t.Errorf("Name(%s) = %q, want: %q", tc.runtime, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestImageExists(t *testing.T) {
+	var tests = []struct {
+		runtime string
+		name    string
+		sha     string
+		want    bool
+	}{
+		{"docker", "missing", "0000000000000000000000000000000000000000000000000000000000000000", false},
+		{"docker", "image", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", true},
+		{"crio", "missing", "0000000000000000000000000000000000000000000000000000000000000000", false},
+		{"crio", "image", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.runtime, func(t *testing.T) {
+			r, err := New(Config{Type: tc.runtime, Runner: NewFakeRunner(t)})
+			if err != nil {
+				t.Fatalf("New(%s): %v", tc.runtime, err)
+			}
+
+			got := r.ImageExists(tc.name, tc.sha)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("ImageExists(%s) returned diff (-want +got):\n%s", tc.runtime, diff)
+			}
+		})
+	}
+}
+
+func TestCGroupDriver(t *testing.T) {
+	var tests = []struct {
+		runtime string
+		want    string
+	}{
+		{"docker", "cgroupfs"},
+		{"crio", "cgroupfs"},
+		{"containerd", "cgroupfs"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.runtime, func(t *testing.T) {
+			r, err := New(Config{Type: tc.runtime, Runner: NewFakeRunner(t)})
+			if err != nil {
+				t.Fatalf("New(%s): %v", tc.runtime, err)
+			}
+
+			got, err := r.CGroupDriver()
+			if err != nil {
+				t.Fatalf("CGroupDriver(): %v", err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("CGroupDriver(%s) returned diff (-want +got):\n%s", tc.runtime, diff)
 			}
 		})
 	}
@@ -87,9 +146,9 @@ func TestKubeletOptions(t *testing.T) {
 type serviceState int
 
 const (
-	Exited serviceState = iota
-	Running
-	Restarted
+	SvcExited serviceState = iota
+	SvcRunning
+	SvcRestarted
 )
 
 // FakeRunner is a command runner that isn't very smart.
@@ -110,79 +169,152 @@ func NewFakeRunner(t *testing.T) *FakeRunner {
 	}
 }
 
-// Run a fake command!
-func (f *FakeRunner) CombinedOutput(cmd string) (string, error) {
-	f.cmds = append(f.cmds, cmd)
-
-	root := false
-	args := strings.Split(cmd, " ")
-	bin, args := args[0], args[1:]
-	f.t.Logf("bin=%s args=%v", bin, args)
-	if bin == "sudo" {
-		root = true
-		bin, args = args[0], args[1:]
+func buffer(s string, err error) (*command.RunResult, error) {
+	rr := &command.RunResult{}
+	if err != nil {
+		return rr, err
 	}
-	switch bin {
-	case "systemctl":
-		return f.systemctl(args, root)
-	case "docker":
-		return f.docker(args, root)
-	case "crictl":
-		return f.crictl(args, root)
-	case "crio":
-		return f.crio(args, root)
-	case "containerd":
-		return f.containerd(args, root)
-	default:
-		return "", nil
+	var buf bytes.Buffer
+	_, err = buf.WriteString(s)
+	if err != nil {
+		return rr, errors.Wrap(err, "Writing outStr to FakeRunner's buffer")
 	}
+	rr.Stdout = buf
+	rr.Stderr = buf
+	return rr, err
 }
 
 // Run a fake command!
-func (f *FakeRunner) Run(cmd string) error {
-	_, err := f.CombinedOutput(cmd)
-	return err
+func (f *FakeRunner) RunCmd(cmd *exec.Cmd) (*command.RunResult, error) {
+	xargs := cmd.Args
+	f.cmds = append(f.cmds, xargs...)
+	root := false
+	bin, args := xargs[0], xargs[1:]
+	f.t.Logf("bin=%s args=%v", bin, args)
+	if bin == "sudo" {
+		root = true
+		bin, args = xargs[1], xargs[2:]
+	}
+	switch bin {
+	case "systemctl":
+		return buffer(f.systemctl(args, root))
+	case "which":
+		return buffer(f.which(args, root))
+	case "docker":
+		return buffer(f.docker(args, root))
+	case "podman":
+		return buffer(f.podman(args, root))
+	case "crictl", "/usr/bin/crictl":
+		return buffer(f.crictl(args, root))
+	case "crio":
+		return buffer(f.crio(args, root))
+	case "containerd":
+		return buffer(f.containerd(args, root))
+	default:
+		rr := &command.RunResult{}
+		return rr, nil
+	}
+}
+
+func (f *FakeRunner) Copy(assets.CopyableFile) error {
+	return nil
+}
+
+func (f *FakeRunner) Remove(assets.CopyableFile) error {
+	return nil
+}
+
+func (f *FakeRunner) dockerPs(args []string) (string, error) {
+	// ps -a --filter="name=apiserver" --format="{{.ID}}"
+	if args[1] == "-a" && strings.HasPrefix(args[2], "--filter") {
+		filter := strings.Split(args[2], `r=`)[1]
+		fname := strings.Split(filter, "=")[1]
+		ids := []string{}
+		f.t.Logf("fake docker: Looking for containers matching %q", fname)
+		for id, cname := range f.containers {
+			if strings.Contains(cname, fname) {
+				ids = append(ids, id)
+			}
+		}
+		f.t.Logf("fake docker: Found containers: %v", ids)
+		return strings.Join(ids, "\n"), nil
+	}
+	return "", nil
+}
+
+func (f *FakeRunner) dockerStop(args []string) (string, error) {
+	ids := strings.Split(args[1], " ")
+	for _, id := range ids {
+		f.t.Logf("fake docker: Stopping id %q", id)
+		if f.containers[id] == "" {
+			return "", fmt.Errorf("no such container")
+		}
+		delete(f.containers, id)
+	}
+	return "", nil
+}
+
+func (f *FakeRunner) dockerRm(args []string) (string, error) {
+	// Skip "-f" argument
+	for _, id := range args[2:] {
+		f.t.Logf("fake docker: Removing id %q", id)
+		if f.containers[id] == "" {
+			return "", fmt.Errorf("no such container")
+		}
+		delete(f.containers, id)
+	}
+	return "", nil
 }
 
 // docker is a fake implementation of docker
 func (f *FakeRunner) docker(args []string, _ bool) (string, error) {
 	switch cmd := args[0]; cmd {
 	case "ps":
-		// ps -a --filter="name=apiserver" --format="{{.ID}}"
-		if args[1] == "-a" && strings.HasPrefix(args[2], "--filter") {
-			filter := strings.Split(args[2], `"`)[1]
-			fname := strings.Split(filter, "=")[1]
-			ids := []string{}
-			f.t.Logf("fake docker: Looking for containers matching %q", fname)
-			for id, cname := range f.containers {
-				if strings.Contains(cname, fname) {
-					ids = append(ids, id)
-				}
-			}
-			f.t.Logf("fake docker: Found containers: %v", ids)
-			return strings.Join(ids, "\n"), nil
-		}
-	case "stop":
-		for _, id := range args[1:] {
-			f.t.Logf("fake docker: Stopping id %q", id)
-			if f.containers[id] == "" {
-				return "", fmt.Errorf("no such container")
-			}
-			delete(f.containers, id)
-		}
-	case "rm":
-		// Skip "-f" argument
-		for _, id := range args[2:] {
-			f.t.Logf("fake docker: Removing id %q", id)
-			if f.containers[id] == "" {
-				return "", fmt.Errorf("no such container")
-			}
-			delete(f.containers, id)
+		return f.dockerPs(args)
 
-		}
+	case "stop":
+		return f.dockerStop(args)
+
+	case "rm":
+		return f.dockerRm(args)
+
 	case "version":
-		if args[1] == "--format" && args[2] == "'{{.Server.Version}}'" {
+
+		if args[1] == "--format" && args[2] == "{{.Server.Version}}" {
 			return "18.06.2-ce", nil
+		}
+
+	case "inspect":
+
+		if args[1] == "--format" && args[2] == "{{.Id}}" {
+			if args[3] == "missing" {
+				return "", &exec.ExitError{Stderr: []byte("Error: No such object: missing")}
+			}
+			return "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", nil
+		}
+
+	case "info":
+
+		if args[1] == "--format" && args[2] == "{{.CgroupDriver}}" {
+			return "cgroupfs", nil
+		}
+	}
+	return "", nil
+}
+
+// podman is a fake implementation of podman
+func (f *FakeRunner) podman(args []string, _ bool) (string, error) {
+	switch cmd := args[0]; cmd {
+	case "--version":
+		return "podman version 1.6.4", nil
+
+	case "inspect":
+
+		if args[1] == "--format" && args[2] == "{{.Id}}" {
+			if args[3] == "missing" {
+				return "", &exec.ExitError{Stderr: []byte("Error: error getting image \"missing\": unable to find a name and tag match for missing in repotags: no such image")}
+			}
+			return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", nil
 		}
 
 	}
@@ -190,9 +322,12 @@ func (f *FakeRunner) docker(args []string, _ bool) (string, error) {
 }
 
 // crio is a fake implementation of crio
-func (f *FakeRunner) crio(args []string, _ bool) (string, error) {
+func (f *FakeRunner) crio(args []string, _ bool) (string, error) { //nolint (result 1 (error) is always nil)
 	if args[0] == "--version" {
 		return "crio version 1.13.0", nil
+	}
+	if args[0] == "config" {
+		return "# Cgroup management implementation used for the runtime.\ncgroup_manager = \"cgroupfs\"\n", nil
 	}
 	return "", nil
 }
@@ -202,16 +337,41 @@ func (f *FakeRunner) containerd(args []string, _ bool) (string, error) {
 	if args[0] == "--version" {
 		return "containerd github.com/containerd/containerd v1.2.0 c4446665cb9c30056f4998ed953e6d4ff22c7c39", nil
 	}
+	if args[0] != "--version" { // doing this to suppress lint "result 1 (error) is always nil"
+		return "", fmt.Errorf("unknown args[0]")
+	}
 	return "", nil
 }
 
 // crictl is a fake implementation of crictl
 func (f *FakeRunner) crictl(args []string, _ bool) (string, error) {
+	f.t.Logf("crictl args: %s", args)
 	switch cmd := args[0]; cmd {
+	case "info":
+		return `{
+		  "status": {
+		  },
+		  "config": {
+		    "systemdCgroup": false
+		  },
+		  "golang": "go1.11.13"
+		}`, nil
 	case "ps":
+		fmt.Printf("args %d: %v\n", len(args), args)
+		if len(args) != 4 {
+			f.t.Logf("crictl all")
+			ids := []string{}
+			for id := range f.containers {
+				ids = append(ids, id)
+			}
+			f.t.Logf("fake crictl: Found containers: %v", ids)
+			return strings.Join(ids, "\n"), nil
+		}
+
 		// crictl ps -a --name=apiserver --state=Running --quiet
-		if args[1] == "-a" && strings.HasPrefix(args[2], "--name") {
-			fname := strings.Split(args[2], "=")[1]
+		if args[1] == "-a" && strings.HasPrefix(args[3], "--name") {
+			fname := strings.Split(args[3], "=")[1]
+			f.t.Logf("crictl filter for %s", fname)
 			ids := []string{}
 			f.t.Logf("fake crictl: Looking for containers matching %q", fname)
 			for id, cname := range f.containers {
@@ -221,14 +381,6 @@ func (f *FakeRunner) crictl(args []string, _ bool) (string, error) {
 			}
 			f.t.Logf("fake crictl: Found containers: %v", ids)
 			return strings.Join(ids, "\n"), nil
-		} else if args[1] == "-a" {
-			ids := []string{}
-			for id := range f.containers {
-				ids = append(ids, id)
-			}
-			f.t.Logf("fake crictl: Found containers: %v", ids)
-			return strings.Join(ids, "\n"), nil
-
 		}
 	case "stop":
 		for _, id := range args[1:] {
@@ -253,7 +405,7 @@ func (f *FakeRunner) crictl(args []string, _ bool) (string, error) {
 }
 
 // systemctl is a fake implementation of systemctl
-func (f *FakeRunner) systemctl(args []string, root bool) (string, error) {
+func (f *FakeRunner) systemctl(args []string, root bool) (string, error) { // nolint result 0 (string) is always ""
 	action := args[0]
 	svcs := args[1:]
 	out := ""
@@ -263,6 +415,7 @@ func (f *FakeRunner) systemctl(args []string, root bool) (string, error) {
 		if arg == "service" {
 			svcs = args[i+1:]
 		}
+
 	}
 
 	for _, svc := range svcs {
@@ -276,23 +429,23 @@ func (f *FakeRunner) systemctl(args []string, root bool) (string, error) {
 			if !root {
 				return out, fmt.Errorf("not root")
 			}
-			f.services[svc] = Exited
+			f.services[svc] = SvcExited
 			f.t.Logf("fake systemctl: stopped %s", svc)
 		case "start":
 			if !root {
 				return out, fmt.Errorf("not root")
 			}
-			f.services[svc] = Running
+			f.services[svc] = SvcRunning
 			f.t.Logf("fake systemctl: started %s", svc)
 		case "restart":
 			if !root {
 				return out, fmt.Errorf("not root")
 			}
-			f.services[svc] = Restarted
-			f.t.Logf("fake systemctl: restarted %s", svc)
+			f.services[svc] = SvcRestarted
+			f.t.Logf("fake systemctl: SvcRestarted %s", svc)
 		case "is-active":
 			f.t.Logf("fake systemctl: %s is-status: %v", svc, state)
-			if state == Running {
+			if state == SvcRunning {
 				return out, nil
 			}
 			return out, fmt.Errorf("%s in state: %v", svc, state)
@@ -301,6 +454,13 @@ func (f *FakeRunner) systemctl(args []string, root bool) (string, error) {
 		}
 	}
 	return out, nil
+}
+
+// which is a fake implementation of which
+func (f *FakeRunner) which(args []string, root bool) (string, error) { // nolint result 0 (string) is always ""
+	command := args[0]
+	path := fmt.Sprintf("/usr/bin/%s", command)
+	return path, nil
 }
 
 func TestVersion(t *testing.T) {
@@ -314,8 +474,7 @@ func TestVersion(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.runtime, func(t *testing.T) {
-			runner := NewFakeRunner(t)
-			r, err := New(Config{Type: tc.runtime, Runner: runner})
+			r, err := New(Config{Type: tc.runtime, Runner: NewFakeRunner(t)})
 			if err != nil {
 				t.Fatalf("New(%s): %v", tc.runtime, err)
 			}
@@ -332,11 +491,11 @@ func TestVersion(t *testing.T) {
 
 // defaultServices reflects the default boot state for the minikube VM
 var defaultServices = map[string]serviceState{
-	"docker":        Running,
-	"docker.socket": Running,
-	"crio":          Exited,
-	"crio-shutdown": Exited,
-	"containerd":    Exited,
+	"docker":        SvcRunning,
+	"docker.socket": SvcRunning,
+	"crio":          SvcExited,
+	"crio-shutdown": SvcExited,
+	"containerd":    SvcExited,
 }
 
 func TestDisable(t *testing.T) {
@@ -344,9 +503,9 @@ func TestDisable(t *testing.T) {
 		runtime string
 		want    []string
 	}{
-		{"docker", []string{"sudo systemctl stop docker docker.socket"}},
-		{"crio", []string{"sudo systemctl stop crio"}},
-		{"containerd", []string{"sudo systemctl stop containerd"}},
+		{"docker", []string{"sudo", "systemctl", "stop", "docker", "docker.socket"}},
+		{"crio", []string{"sudo", "systemctl", "stop", "crio"}},
+		{"containerd", []string{"sudo", "systemctl", "stop", "containerd"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.runtime, func(t *testing.T) {
@@ -375,25 +534,25 @@ func TestEnable(t *testing.T) {
 		want    map[string]serviceState
 	}{
 		{"docker", map[string]serviceState{
-			"docker":        Running,
-			"docker.socket": Running,
-			"containerd":    Exited,
-			"crio":          Exited,
-			"crio-shutdown": Exited,
+			"docker":        SvcRunning,
+			"docker.socket": SvcRunning,
+			"containerd":    SvcExited,
+			"crio":          SvcExited,
+			"crio-shutdown": SvcExited,
 		}},
 		{"containerd", map[string]serviceState{
-			"docker":        Exited,
-			"docker.socket": Exited,
-			"containerd":    Restarted,
-			"crio":          Exited,
-			"crio-shutdown": Exited,
+			"docker":        SvcExited,
+			"docker.socket": SvcExited,
+			"containerd":    SvcRestarted,
+			"crio":          SvcExited,
+			"crio-shutdown": SvcExited,
 		}},
 		{"crio", map[string]serviceState{
-			"docker":        Exited,
-			"docker.socket": Exited,
-			"containerd":    Exited,
-			"crio":          Restarted,
-			"crio-shutdown": Exited,
+			"docker":        SvcExited,
+			"docker.socket": SvcExited,
+			"containerd":    SvcExited,
+			"crio":          SvcRestarted,
+			"crio-shutdown": SvcExited,
 		}},
 	}
 	for _, tc := range tests {
@@ -445,7 +604,7 @@ func TestContainerFunctions(t *testing.T) {
 			}
 
 			// Get the list of apiservers
-			got, err := cr.ListContainers("apiserver")
+			got, err := cr.ListContainers(ListOptions{Name: "apiserver"})
 			if err != nil {
 				t.Fatalf("ListContainers: %v", err)
 			}
@@ -458,7 +617,7 @@ func TestContainerFunctions(t *testing.T) {
 			if err := cr.StopContainers(got); err != nil {
 				t.Fatalf("stop failed: %v", err)
 			}
-			got, err = cr.ListContainers("apiserver")
+			got, err = cr.ListContainers(ListOptions{Name: "apiserver"})
 			if err != nil {
 				t.Fatalf("ListContainers: %v", err)
 			}
@@ -468,7 +627,7 @@ func TestContainerFunctions(t *testing.T) {
 			}
 
 			// Get the list of everything else.
-			got, err = cr.ListContainers("")
+			got, err = cr.ListContainers(ListOptions{})
 			if err != nil {
 				t.Fatalf("ListContainers: %v", err)
 			}
@@ -481,7 +640,7 @@ func TestContainerFunctions(t *testing.T) {
 			if err := cr.KillContainers(got); err != nil {
 				t.Errorf("KillContainers: %v", err)
 			}
-			got, err = cr.ListContainers("")
+			got, err = cr.ListContainers(ListOptions{})
 			if err != nil {
 				t.Fatalf("ListContainers: %v", err)
 			}

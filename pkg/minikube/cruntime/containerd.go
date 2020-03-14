@@ -17,17 +17,104 @@ limitations under the License.
 package cruntime
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"os/exec"
+	"path"
 	"strings"
+	"text/template"
 
+	"github.com/blang/semver"
 	"github.com/golang/glog"
+	"github.com/pkg/errors"
+	"k8s.io/minikube/pkg/minikube/bootstrapper/images"
+	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/out"
+)
+
+const (
+	containerdNamespaceRoot = "/run/containerd/runc/k8s.io"
+	// ContainerdConfFile is the path to the containerd configuration
+	containerdConfigFile     = "/etc/containerd/config.toml"
+	containerdConfigTemplate = `root = "/var/lib/containerd"
+state = "/run/containerd"
+oom_score = 0
+
+[grpc]
+  address = "/run/containerd/containerd.sock"
+  uid = 0
+  gid = 0
+  max_recv_message_size = 16777216
+  max_send_message_size = 16777216
+
+[debug]
+  address = ""
+  uid = 0
+  gid = 0
+  level = ""
+
+[metrics]
+  address = ""
+  grpc_histogram = false
+
+[cgroup]
+  path = ""
+
+[plugins]
+  [plugins.cgroups]
+    no_prometheus = false
+  [plugins.cri]
+    stream_server_address = ""
+    stream_server_port = "10010"
+    enable_selinux = false
+    sandbox_image = "{{ .PodInfraContainerImage }}"
+    stats_collect_period = 10
+    systemd_cgroup = false
+    enable_tls_streaming = false
+    max_container_log_line_size = 16384
+    [plugins.cri.containerd]
+      snapshotter = "overlayfs"
+      no_pivot = true
+      [plugins.cri.containerd.default_runtime]
+        runtime_type = "io.containerd.runtime.v1.linux"
+        runtime_engine = ""
+        runtime_root = ""
+      [plugins.cri.containerd.untrusted_workload_runtime]
+        runtime_type = ""
+        runtime_engine = ""
+        runtime_root = ""
+    [plugins.cri.cni]
+      bin_dir = "/opt/cni/bin"
+      conf_dir = "/etc/cni/net.d"
+      conf_template = ""
+    [plugins.cri.registry]
+      [plugins.cri.registry.mirrors]
+        [plugins.cri.registry.mirrors."docker.io"]
+          endpoint = ["https://registry-1.docker.io"]
+  [plugins.diff-service]
+    default = ["walking"]
+  [plugins.linux]
+    shim = "containerd-shim"
+    runtime = "runc"
+    runtime_root = ""
+    no_shim = false
+    shim_debug = false
+  [plugins.scheduler]
+    pause_threshold = 0.02
+    deletion_threshold = 0
+    mutation_threshold = 100
+    schedule_delay = "0s"
+    startup_delay = "100ms"
+`
 )
 
 // Containerd contains containerd runtime state
 type Containerd struct {
-	Socket string
-	Runner CommandRunner
+	Socket            string
+	Runner            CommandRunner
+	ImageRepository   string
+	KubernetesVersion semver.Version
 }
 
 // Name is a human readable name for containerd
@@ -42,17 +129,17 @@ func (r *Containerd) Style() out.StyleEnum {
 
 // Version retrieves the current version of this runtime
 func (r *Containerd) Version() (string, error) {
-	ver, err := r.Runner.CombinedOutput("containerd --version")
+	c := exec.Command("containerd", "--version")
+	rr, err := r.Runner.RunCmd(c)
 	if err != nil {
-		return "", err
+		return "", errors.Wrapf(err, "containerd check version.")
 	}
-
 	// containerd github.com/containerd/containerd v1.2.0 c4446665cb9c30056f4998ed953e6d4ff22c7c39
-	words := strings.Split(ver, " ")
+	words := strings.Split(rr.Stdout.String(), " ")
 	if len(words) >= 4 && words[0] == "containerd" {
 		return strings.Replace(words[2], "v", "", 1), nil
 	}
-	return "", fmt.Errorf("unknown version: %q", ver)
+	return "", fmt.Errorf("unknown version: %q", rr.Stdout.String())
 }
 
 // SocketPath returns the path to the socket file for containerd
@@ -70,13 +157,38 @@ func (r *Containerd) DefaultCNI() bool {
 
 // Active returns if containerd is active on the host
 func (r *Containerd) Active() bool {
-	err := r.Runner.Run("systemctl is-active --quiet service containerd")
+	c := exec.Command("sudo", "systemctl", "is-active", "--quiet", "service", "containerd")
+	_, err := r.Runner.RunCmd(c)
 	return err == nil
 }
 
 // Available returns an error if it is not possible to use this runtime on a host
 func (r *Containerd) Available() error {
-	return r.Runner.Run("command -v containerd")
+	c := exec.Command("which", "containerd")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "check containerd availability.")
+	}
+	return nil
+}
+
+// generateContainerdConfig sets up /etc/containerd/config.toml
+func generateContainerdConfig(cr CommandRunner, imageRepository string, kv semver.Version) error {
+	cPath := containerdConfigFile
+	t, err := template.New("containerd.config.toml").Parse(containerdConfigTemplate)
+	if err != nil {
+		return err
+	}
+	pauseImage := images.Pause(kv, imageRepository)
+	opts := struct{ PodInfraContainerImage string }{PodInfraContainerImage: pauseImage}
+	var b bytes.Buffer
+	if err := t.Execute(&b, opts); err != nil {
+		return err
+	}
+	c := exec.Command("/bin/bash", "-c", fmt.Sprintf("sudo mkdir -p %s && printf %%s \"%s\" | base64 -d | sudo tee %s", path.Dir(cPath), base64.StdEncoding.EncodeToString(b.Bytes()), cPath))
+	if _, err := cr.RunCmd(c); err != nil {
+		return errors.Wrap(err, "generate containerd cfg.")
+	}
+	return nil
 }
 
 // Enable idempotently enables containerd on a host
@@ -89,22 +201,69 @@ func (r *Containerd) Enable(disOthers bool) error {
 	if err := populateCRIConfig(r.Runner, r.SocketPath()); err != nil {
 		return err
 	}
+	if err := generateContainerdConfig(r.Runner, r.ImageRepository, r.KubernetesVersion); err != nil {
+		return err
+	}
 	if err := enableIPForwarding(r.Runner); err != nil {
 		return err
 	}
 	// Otherwise, containerd will fail API requests with 'Unimplemented'
-	return r.Runner.Run("sudo systemctl restart containerd")
+	c := exec.Command("sudo", "systemctl", "restart", "containerd")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrap(err, "restart containerd")
+	}
+	return nil
 }
 
 // Disable idempotently disables containerd on a host
 func (r *Containerd) Disable() error {
-	return r.Runner.Run("sudo systemctl stop containerd")
+	c := exec.Command("sudo", "systemctl", "stop", "containerd")
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrapf(err, "stop containerd")
+	}
+	return nil
+}
+
+// ImageExists checks if an image exists, expected input format
+func (r *Containerd) ImageExists(name string, sha string) bool {
+	c := exec.Command("/bin/bash", "-c", fmt.Sprintf("sudo ctr -n=k8s.io images check | grep %s | grep %s", name, sha))
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return false
+	}
+	return true
 }
 
 // LoadImage loads an image into this runtime
 func (r *Containerd) LoadImage(path string) error {
 	glog.Infof("Loading image: %s", path)
-	return r.Runner.Run(fmt.Sprintf("sudo ctr -n=k8s.io images import %s", path))
+	c := exec.Command("sudo", "ctr", "-n=k8s.io", "images", "import", path)
+	if _, err := r.Runner.RunCmd(c); err != nil {
+		return errors.Wrapf(err, "ctr images import")
+	}
+	return nil
+}
+
+// CGroupDriver returns cgroup driver ("cgroupfs" or "systemd")
+func (r *Containerd) CGroupDriver() (string, error) {
+	info, err := getCRIInfo(r.Runner)
+	if err != nil {
+		return "", err
+	}
+	if info["config"] == nil {
+		return "", errors.Wrapf(err, "missing config")
+	}
+	config, ok := info["config"].(map[string]interface{})
+	if !ok {
+		return "", errors.Wrapf(err, "config not map")
+	}
+	cgroupManager := "cgroupfs" // default
+	switch config["systemdCgroup"] {
+	case false:
+		cgroupManager = "cgroupfs"
+	case true:
+		cgroupManager = "systemd"
+	}
+	return cgroupManager, nil
 }
 
 // KubeletOptions returns kubelet options for a containerd
@@ -118,8 +277,18 @@ func (r *Containerd) KubeletOptions() map[string]string {
 }
 
 // ListContainers returns a list of managed by this container runtime
-func (r *Containerd) ListContainers(filter string) ([]string, error) {
-	return listCRIContainers(r.Runner, filter)
+func (r *Containerd) ListContainers(o ListOptions) ([]string, error) {
+	return listCRIContainers(r.Runner, containerdNamespaceRoot, o)
+}
+
+// PauseContainers pauses a running container based on ID
+func (r *Containerd) PauseContainers(ids []string) error {
+	return pauseCRIContainers(r.Runner, containerdNamespaceRoot, ids)
+}
+
+// UnpauseContainers unpauses a running container based on ID
+func (r *Containerd) UnpauseContainers(ids []string) error {
+	return unpauseCRIContainers(r.Runner, containerdNamespaceRoot, ids)
 }
 
 // KillContainers removes containers based on ID
@@ -134,10 +303,15 @@ func (r *Containerd) StopContainers(ids []string) error {
 
 // ContainerLogCmd returns the command to retrieve the log for a container based on ID
 func (r *Containerd) ContainerLogCmd(id string, len int, follow bool) string {
-	return criContainerLogCmd(id, len, follow)
+	return criContainerLogCmd(r.Runner, id, len, follow)
 }
 
 // SystemLogCmd returns the command to retrieve system logs
 func (r *Containerd) SystemLogCmd(len int) string {
 	return fmt.Sprintf("sudo journalctl -u containerd -n %d", len)
+}
+
+// Preload preloads the container runtime with k8s images
+func (r *Containerd) Preload(cfg config.KubernetesConfig) error {
+	return fmt.Errorf("not yet implemented for %s", r.Name())
 }

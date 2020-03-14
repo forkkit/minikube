@@ -1,5 +1,530 @@
 # Release Notes
 
+## Version 1.8.2 - 2020-03-13
+
+Shiny new improvements:
+
+* allow setting api-server port for docker/podman drivers [#6991](https://github.com/kubernetes/minikube/pull/6991)
+* Update NewestKubernetesVersion to 1.18.0-beta.2 [#6988](https://github.com/kubernetes/minikube/pull/6988)
+* Add warning if disk image is missing features [#6978](https://github.com/kubernetes/minikube/pull/6978)
+
+Captivating bug fixes:
+
+* Hyper-V: Round suggested memory alloc by 100MB for VM's [#6987](https://github.com/kubernetes/minikube/pull/6987)
+* Merge repositories.json after extracting preloaded tarball so that reference store isn't lost [#6985](https://github.com/kubernetes/minikube/pull/6985)
+* Fix dockerd internal port changing on restart [#7021](https://github.com/kubernetes/minikube/pull/7021)
+* none: Skip driver preload and image caching [#7015](https://github.com/kubernetes/minikube/pull/7015)
+* preload: fix bug for windows file separators [#6968](https://github.com/kubernetes/minikube/pull/6968)
+* Block on preload download [#7003](https://github.com/kubernetes/minikube/pull/7003)
+* Check if lz4 is available before trying to use it [#6941](https://github.com/kubernetes/minikube/pull/6941)
+* Allow backwards compatibility with 1.6 and earlier configs [#6969](https://github.com/kubernetes/minikube/pull/6969)
+
+Huge thank you for this release towards our contributors: 
+- Anders F Björklund
+- Ian Molee
+- Kenta Iso
+- Medya Ghazizadeh
+- Priya Wadhwa
+- Sharif Elgamal
+- Thomas Strömberg
+
+## Version 1.8.1 - 2020-03-06
+
+Minor bug fix:
+
+* Block on preload download before extracting, fall back to caching images if it fails [#6928](https://github.com/kubernetes/minikube/pull/6928)
+* Cleanup remaining PointToHostDockerDaemon calls [#6925](https://github.com/kubernetes/minikube/pull/6925)
+
+Huge thank you for this release towards our contributors: 
+- Priya Wadhwa
+- Thomas Stromberg
+- Medya Ghazizadeh
+
+## Version 1.8.0 - 2020-03-06
+
+Exciting new improvements:
+
+* Promote docker driver priority from "experimental" to "fallback" [#6791](https://github.com/kubernetes/minikube/pull/6791)
+* Preload tarball images for kic drivers (docker,podman) [#6720](https://github.com/kubernetes/minikube/pull/6720)
+* Preload tarball images for VMs drivers as well [#6898](https://github.com/kubernetes/minikube/pull/6898)
+* Add tunnel for docker driver on darwin  [#6460](https://github.com/kubernetes/minikube/pull/6460)
+* Add service feature to docker driver on darwin [#6811](https://github.com/kubernetes/minikube/pull/6811)
+* Add cri-o runtime to kic drivers (podman,docker) [#6756](https://github.com/kubernetes/minikube/pull/6756)
+* Add mount feature to kic drivers (podman,docker) [#6630](https://github.com/kubernetes/minikube/pull/6630)
+* Rename --vm-driver flag to --driver for start command [#6888](https://github.com/kubernetes/minikube/pull/6888)
+* Add Korean translation [#6910](https://github.com/kubernetes/minikube/pull/6910)
+* Add k8s binaries to preloaded tarball [#6870](https://github.com/kubernetes/minikube/pull/6870)
+* Add lz4 and tar to iso [#6897](https://github.com/kubernetes/minikube/pull/6897)
+* Add packaging of the falco_probe kernel module [#6560](https://github.com/kubernetes/minikube/pull/6560)
+* Automatically scale the default memory allocation [#6900](https://github.com/kubernetes/minikube/pull/6900)
+* Change cgroup driver from cgroupfs to systemd [#6651](https://github.com/kubernetes/minikube/pull/6651)
+* Unify downloaders, add GitHub and Alibaba ISO fallbacks [#6892](https://github.com/kubernetes/minikube/pull/6892)
+* Upgrade cni and cni-plugins to spec 0.4.0 [#6784](https://github.com/kubernetes/minikube/pull/6784)
+* Label minikube nodes [#6717](https://github.com/kubernetes/minikube/pull/6717)
+* Add more Chinese translations [#6813](https://github.com/kubernetes/minikube/pull/6813)
+* Update addon registry 2.6.1 → 2.7.1 [#6707](https://github.com/kubernetes/minikube/pull/6707)
+* Use 'k8s.gcr.io' instead of 'gcr.io/google-containers' [#6908](https://github.com/kubernetes/minikube/pull/6908)
+
+Important bug fixes:
+
+* Fix inverted certificate symlink creation logic [#6889](https://github.com/kubernetes/minikube/pull/6889)
+* Add systemd patch for handling DHCP router [#6659](https://github.com/kubernetes/minikube/pull/6659)
+* Docker: handle already in use container name [#6906](https://github.com/kubernetes/minikube/pull/6906)
+* Fix delete --all if using non default profile [#6875](https://github.com/kubernetes/minikube/pull/6875)
+* Fix native-ssh flag for the ssh command [#6858](https://github.com/kubernetes/minikube/pull/6858)
+* Fix start for existing profile with different vm-driver [#6828](https://github.com/kubernetes/minikube/pull/6828)
+* Fix: disabling a disabled addon should not error [#6817](https://github.com/kubernetes/minikube/pull/6817)
+* Fix: do not change the profile to a none existing profile [#6774](https://github.com/kubernetes/minikube/pull/6774)
+* Generate fish compatible docker-env hint [#6744](https://github.com/kubernetes/minikube/pull/6744)
+* Specifying control plane IP in kubeadm config template [#6745](https://github.com/kubernetes/minikube/pull/6745)
+* hyperv detection: increase timeout from 2s to 8s [#6701](https://github.com/kubernetes/minikube/pull/6701)
+* kic: fix service list for docker on darwin [#6830](https://github.com/kubernetes/minikube/pull/6830)
+* kic: fix unprivileged port bind tunnel docker for darwin [#6833](https://github.com/kubernetes/minikube/pull/6833)
+* profile list: exit zero even if one profile is not ready [#6882](https://github.com/kubernetes/minikube/pull/6882)
+* tunnel on docker driver on mac: fix known_hosts issue [#6810](https://github.com/kubernetes/minikube/pull/6810)
+* docker-env: fix semicolons required for fish 2.x users [#6915](https://github.com/kubernetes/minikube/pull/6915)
+
+Thank you to everyone who helped with this extraordinary release. We now invite everyone to give the `--driver=docker` option a try!
+
+- Anders Björklund
+- Black-Hole
+- Csongor Halmai
+- Jose Donizetti
+- Keith Schaab
+- Kenta Iso
+- Kevin Pullin
+- Medya Ghazizadeh
+- Naveen Kumar Sangi
+- Nguyen Hai Truong
+- Olivier Lemasle
+- Pierre Ugaz
+- Prasad Katti
+- Priya Wadhwa
+- Sharif Elgamal
+- Song Shukun
+- Tam Mach
+- Thomas Strömberg
+- anencore94
+- sayboras
+- vikkyomkar
+
+## Version 1.7.3 - 2020-02-20
+
+* Add podman driver [#6515](https://github.com/kubernetes/minikube/pull/6515)
+* Create Hyper-V External Switch [#6264](https://github.com/kubernetes/minikube/pull/6264)
+* Don't allow creating profile by profile command [#6672](https://github.com/kubernetes/minikube/pull/6672)
+* Create the Node subcommands for multi-node refactor [#6556](https://github.com/kubernetes/minikube/pull/6556)
+* Improve docker volume clean up [#6695](https://github.com/kubernetes/minikube/pull/6695)
+* Add podman-env for connecting with podman-remote [#6351](https://github.com/kubernetes/minikube/pull/6351)
+* Update gvisor addon to latest runsc version [#6573](https://github.com/kubernetes/minikube/pull/6573)
+* Fix inverted start resource logic [#6700](https://github.com/kubernetes/minikube/pull/6700)
+* Fix bug in --install-addons flag [#6696](https://github.com/kubernetes/minikube/pull/6696)
+* Fix bug in docker-env and add tests for docker-env command [#6604](https://github.com/kubernetes/minikube/pull/6604)
+* Fix kubeConfigPath  [#6568](https://github.com/kubernetes/minikube/pull/6568)
+* Fix `minikube start` in order to be able to start VM even if machine does not exist [#5730](https://github.com/kubernetes/minikube/pull/5730)
+* Fail fast if waiting for SSH to be available [#6625](https://github.com/kubernetes/minikube/pull/6625)
+* Add RPFilter to ISO kernel - required for modern Calico releases [#6690](https://github.com/kubernetes/minikube/pull/6690)
+* Update Kubernetes default version to v1.17.3 [#6602](https://github.com/kubernetes/minikube/pull/6602)
+* Update crictl to v1.17.0 [#6667](https://github.com/kubernetes/minikube/pull/6667)
+* Add conntrack-tools, needed for kubernetes 1.18 [#6626](https://github.com/kubernetes/minikube/pull/6626)
+* Stopped and running machines should count as existing [#6629](https://github.com/kubernetes/minikube/pull/6629)
+* Upgrade Docker to 19.03.6 [#6618](https://github.com/kubernetes/minikube/pull/6618)
+* Upgrade conmon version for podman [#6622](https://github.com/kubernetes/minikube/pull/6622)
+* Upgrade podman to 1.6.5 [#6623](https://github.com/kubernetes/minikube/pull/6623)
+* Update helm-tiller addon image v2.14.3 → v2.16.1 [#6575](https://github.com/kubernetes/minikube/pull/6575)
+
+Thank you to our wonderful and amazing contributors who contributed to this bug-fix release:
+
+- Anders F Björklund
+- Nguyen Hai Truong
+- Martynas Pumputis
+- Thomas Strömberg
+- Medya Ghazizadeh
+- Wietse Muizelaar
+- Zhongcheng Lao
+- Sharif Elgamal
+- Priya Wadhwa
+- Rohan Maity
+- anencore94
+- aallbright
+- Tam Mach
+- edge0701
+- go_vargo
+
+## Version 1.7.2 - 2020-02-07
+
+* Fix to delete context when delete minikube [#6541](https://github.com/kubernetes/minikube/pull/6541)
+* Fix usage of quotes in cruntime format strings [#6549](https://github.com/kubernetes/minikube/pull/6549)
+* Add ca-certificates directory for distros that do not include it [#6545](https://github.com/kubernetes/minikube/pull/6545)
+* kubeadm template: Combine apiserver certSANs with extraArgs [#6547](https://github.com/kubernetes/minikube/pull/6547)
+* Add --install-addons=false toggle for users who don't want them [#6536](https://github.com/kubernetes/minikube/pull/6536)
+* Fix a variety of bugs in `docker-env` output [#6540](https://github.com/kubernetes/minikube/pull/6540)
+* Remove kubeadm pull images [#6514](https://github.com/kubernetes/minikube/pull/6514)
+
+Special thanks go out to our contributors for these fixes:
+
+- Anders F Björklund
+- anencore94
+- David Taylor
+- Priya Wadhwa
+- Ruben
+- Sharif Elgamal
+- Thomas Strömberg
+
+## Version 1.7.1 - 2020-02-05
+
+* Create directory using os.MkDirAll, as mkdir -p does not work on windows [#6508](https://github.com/kubernetes/minikube/pull/6508)
+* Revert role change from cluster-admin->system:persistent-volume-provisioner [#6511](https://github.com/kubernetes/minikube/pull/6511)
+* gvisor fixes for v1.7.0 [#6512](https://github.com/kubernetes/minikube/pull/6512)
+* Remove pod list stability double check [#6509](https://github.com/kubernetes/minikube/pull/6509)
+* Use cluster-dns IP setup by kubeadm [#6472](https://github.com/kubernetes/minikube/pull/6472)
+* Skip driver autodetection if driver is already set [#6503](https://github.com/kubernetes/minikube/pull/6503)
+* Customizing host path for dynamically provisioned PersistentVolumes [#6156](https://github.com/kubernetes/minikube/pull/6156)
+* Update kubeadm api version from v1beta1 to v1beta2 [#6150](https://github.com/kubernetes/minikube/pull/6150)
+* Use profile name as cluster/node name [#6200](https://github.com/kubernetes/minikube/pull/6200)
+
+Thank you to our wonderful and amazing contributors who contributed to this bug-fix release:
+
+- Nanik T
+- Ruben
+- Sharif Elgamal
+- Thomas Strömberg
+- tstromberg
+- Vijay Katam
+- Zhongcheng Lao
+
+## Version 1.7.0 - 2020-02-04
+
+* Add Azure Container Registry support [#6483](https://github.com/kubernetes/minikube/pull/6483)
+* Support --force for overriding the ssh check [#6237](https://github.com/kubernetes/minikube/pull/6237)
+* Update translation files with new strings [#6491](https://github.com/kubernetes/minikube/pull/6491)
+* fix docker-env for kic drivers [#6487](https://github.com/kubernetes/minikube/pull/6487)
+* Fix bugs that prevented previously-enabled addons from starting up [#6471](https://github.com/kubernetes/minikube/pull/6471)
+* Fix none driver bugs with "pause"  [#6452](https://github.com/kubernetes/minikube/pull/6452)
+
+Thank you to those brave souls who made the final push toward this release:
+
+- Medya Gh
+- Priya Wadhwa
+- Sharif Elgamal
+- Thomas Strömberg
+
+## Version 1.7.0-beta.2 - 2020-01-31
+
+* Add docker run-time for kic driver [#6436](https://github.com/kubernetes/minikube/pull/6436)
+* Configure etcd and kube-proxy metrics to listen on minikube node IP [#6322](https://github.com/kubernetes/minikube/pull/6322)
+* add container runtime info to profile list [#6409](https://github.com/kubernetes/minikube/pull/6409)
+* status: Explicitly state that the cluster does not exist [#6438](https://github.com/kubernetes/minikube/pull/6438)
+* Do not use an arch suffix for the coredns name [#6243](https://github.com/kubernetes/minikube/pull/6243)
+* Prevent registry-creds configure from failing when a secret does not exist.  [#6380](https://github.com/kubernetes/minikube/pull/6380)
+* improve checking modprob netfilter [#6427](https://github.com/kubernetes/minikube/pull/6427)
+
+Huge thank you for this release towards our contributors: 
+
+- Anders Björklund
+- Bjørn Harald Fotland
+- Chance Zibolski
+- Kim Bao Long
+- Medya Ghazizadeh
+- Priya Wadhwa
+- Sharif Elgamal
+- Thomas Strömberg
+- akshay
+
+## Version 1.7.0-beta.1 - 2020-01-24
+
+* Add 'pause' command to freeze Kubernetes cluster [#5962](https://github.com/kubernetes/minikube/pull/5962)
+* kic driver: add multiple profiles and ssh [#6390](https://github.com/kubernetes/minikube/pull/6390)
+* Update DefaultKubernetesVersion to v1.17.2 [#6392](https://github.com/kubernetes/minikube/pull/6392)
+* Add varlink program for using with podman-remote [#6349](https://github.com/kubernetes/minikube/pull/6349)
+* Update Kubernetes libraries to v1.17.2 [#6374](https://github.com/kubernetes/minikube/pull/6374)
+* Remove addon manager [#6334](https://github.com/kubernetes/minikube/pull/6334)
+* Remove unnecessary crio restart to improve start latency [#6369](https://github.com/kubernetes/minikube/pull/6369)
+* Check for nil ref and img before passing them into go-containerregistry [#6236](https://github.com/kubernetes/minikube/pull/6236)
+* Change the compression methods used on the iso [#6341](https://github.com/kubernetes/minikube/pull/6341)
+* Update the crio.conf instead of overwriting it [#6219](https://github.com/kubernetes/minikube/pull/6219)
+* Update Japanese translation [#6339](https://github.com/kubernetes/minikube/pull/6339)
+* Stop minikube dashboard from crashing at start [#6325](https://github.com/kubernetes/minikube/pull/6325)
+
+Thanks you to the following contributors:
+
+- Anders F Björklund
+- inductor
+- Medya Ghazizadeh
+- Naoki Oketani
+- Priya Wadhwa
+- Sharif Elgamal
+- sshukun
+- Thomas Strömberg
+
+## Version 1.7.0-beta.0 - 2020-01-15
+
+* Use CGroupDriver function from cruntime for kubelet [#6287](https://github.com/kubernetes/minikube/pull/6287)
+* Experimental Docker support (kic) using the Kind image [#6151](https://github.com/kubernetes/minikube/pull/6151)
+* disable istio provisioner by default [#6315](https://github.com/kubernetes/minikube/pull/6315)
+* Add --dry-run option to start [#6256](https://github.com/kubernetes/minikube/pull/6256)
+* Improve "addon list" by viewing as a table  [#6274](https://github.com/kubernetes/minikube/pull/6274)
+* Disable IPv6 in the minikube VM until it can be properly supported [#6241](https://github.com/kubernetes/minikube/pull/6241)
+* Fixes IPv6 address handling in kubeadm [#6214](https://github.com/kubernetes/minikube/pull/6214)
+* Upgrade crio to 1.16.1 [#6210](https://github.com/kubernetes/minikube/pull/6210)
+* Upgrade podman to 1.6.4 [#6208](https://github.com/kubernetes/minikube/pull/6208)
+* Enable or disable addons per profile [#6124](https://github.com/kubernetes/minikube/pull/6124)
+* Upgrade buildroot minor version [#6199](https://github.com/kubernetes/minikube/pull/6199)
+* Add systemd patch for booting on AMD Ryzen [#6183](https://github.com/kubernetes/minikube/pull/6183)
+* update zh translation [#6176](https://github.com/kubernetes/minikube/pull/6176)
+* Add istio addon for minikube [#6154](https://github.com/kubernetes/minikube/pull/6154)
+
+Huge thank you for this release towards our contributors:
+- Anders Björklund
+- andylibrian
+- Dao Cong Tien
+- Dominic Yin
+- fenglixa
+- GennadySpb
+- Kenta Iso
+- Kim Bao Long
+- Medya Ghazizadeh
+- Nguyen Hai Truong
+- Priya Wadhwa
+- Sharif Elgamal
+- Thomas Strömberg
+- ttonline6
+- Zhongcheng Lao
+- Zhou Hao
+
+## Version 1.6.2  - 2019-12-19
+
+* Offline: always transfer image if lookup fails, always download drivers [#6111](https://github.com/kubernetes/minikube/pull/6111)
+* Update ingress-dns addon [#6091](https://github.com/kubernetes/minikube/pull/6091)
+* Fix update-context to use KUBECONFIG when the env is set [#6090](https://github.com/kubernetes/minikube/pull/6090)
+* Fixed IPv6 format for SSH [#6110](https://github.com/kubernetes/minikube/pull/6110)
+* Add hyperkit version check whether user's hyperkit is newer [#5833](https://github.com/kubernetes/minikube/pull/5833)
+* start: Remove create/delete retry loop [#6129](https://github.com/kubernetes/minikube/pull/6129)
+* Change error text to encourage better issue reports [#6121](https://github.com/kubernetes/minikube/pull/6121)
+
+Huge thank you for this release towards our contributors:
+- Anukul Sangwan
+- Aresforchina
+- Curtis Carter
+- Kenta Iso
+- Medya Ghazizadeh
+- Sharif Elgamal
+- Thomas Strömberg
+- Zhou Hao
+- priyawadhwa
+- tstromberg
+
+
+## Version 1.6.1  - 2019-12-11
+
+A special bugfix release to fix a Windows regression:
+
+* lock names: Remove uid suffix & hash entire path [#6059](https://github.com/kubernetes/minikube/pull/6059)
+
+## Version 1.6.0 - 2019-12-10
+
+* Update default k8s version to v1.17.0 [#6042](https://github.com/kubernetes/minikube/pull/6042)
+* Make Kubernetes version sticky for a cluster instead of auto-upgrading [#5798](https://github.com/kubernetes/minikube/pull/5798)
+* cache add: load images to all profiles & skip previously cached images [#5987](https://github.com/kubernetes/minikube/pull/5987)
+* Update dashboard to 2.0.0b8 and pre-cache it again [#6039](https://github.com/kubernetes/minikube/pull/6039)
+* Pre-cache the latest kube-addon-manager [#5935](https://github.com/kubernetes/minikube/pull/5935)
+* Add sch_netem kernel module for network emulation [#6038](https://github.com/kubernetes/minikube/pull/6038)
+* Don't use bash as the entrypoint for docker [#5818](https://github.com/kubernetes/minikube/pull/5818)
+* Make lock names uid and path specific to avoid conflicts [#5912](https://github.com/kubernetes/minikube/pull/5912)
+* Remove deprecated annotation storageclass.beta.kubernetes.io [#5954](https://github.com/kubernetes/minikube/pull/5954)
+* show status in profile list [#5988](https://github.com/kubernetes/minikube/pull/5988)
+* Use newer gvisor version [#6000](https://github.com/kubernetes/minikube/pull/6000)
+* Adds dm-crypt support [#5739](https://github.com/kubernetes/minikube/pull/5739)
+* Add performance analysis packages to minikube ISO [#5942](https://github.com/kubernetes/minikube/pull/5942)
+
+Thanks goes out to the merry band of Kubernetes contributors that made this release possible:
+
+- Anders F Björklund
+- Anukul Sangwan
+- Guilherme Pellizzetti
+- Jan Ahrens
+- Karuppiah Natarajan
+- Laura-Marie Henning
+- Medya Ghazizadeh
+- Nanik T
+- Olivier Lemasle
+- Priya Wadhwa
+- Sharif Elgamal
+- Thomas Strömberg
+- Vasyl Purchel
+- Wietse Muizelaar
+
+## Version 1.6.0-beta.1 - 2019-11-26
+
+* cri-o v1.16.0 [#5970](https://github.com/kubernetes/minikube/pull/5970)
+* Update default k8s version to 1.17.0-rc.1 [#5973](https://github.com/kubernetes/minikube/pull/5973)
+* Update crictl to v1.16.1 [#5972](https://github.com/kubernetes/minikube/pull/5972)
+* Update docker to v19.03.5 [#5914](https://github.com/kubernetes/minikube/pull/5914)
+* Fix profile list for non existenting folder  [#5955](https://github.com/kubernetes/minikube/pull/5955)
+* Upgrade podman to 1.6.3 [#5971](https://github.com/kubernetes/minikube/pull/5971)
+* Fix validation of container-runtime config [#5964](https://github.com/kubernetes/minikube/pull/5964)
+* Add option for virtualbox users to set nat-nic-type  [#5960](https://github.com/kubernetes/minikube/pull/5960)
+* Upgrade buildroot minor version to 2019.02.7 [#5967](https://github.com/kubernetes/minikube/pull/5967)
+* dashboard: Update to latest images (2.0.0-beta6) [#5934](https://github.com/kubernetes/minikube/pull/5934)
+
+Huge thank you for this release towards our contributors: 
+- Adam Crowder
+- Anders F Björklund
+- David Newman
+- Harsimran Singh Maan
+- Kenta Iso
+- Medya Ghazizadeh
+- Reuven Harrison
+- Sharif Elgamal
+- Thomas Stromberg
+- yuxiaobo
+
+## Version 1.6.0-beta.0 - 2019-11-15
+
+* Update DefaultKubernetesVersion to v1.17.0-beta.1 to prepare for betas [#5925](https://github.com/kubernetes/minikube/pull/5925)
+* Make it possible to recover from a previously aborted StartCluster (Ctrl-C) [#5916](https://github.com/kubernetes/minikube/pull/5916)
+* Add retry to SSH connectivity check [#5848](https://github.com/kubernetes/minikube/pull/5848)
+* Make --wait=false non-blocking, --wait=true blocks on system pods [#5894](https://github.com/kubernetes/minikube/pull/5894)
+* Only copy new or modified files into VM on restart [#5864](https://github.com/kubernetes/minikube/pull/5864)
+* Remove heapster addon [#5243](https://github.com/kubernetes/minikube/pull/5243)
+* mention fix for AppArmor related permission errors [#5842](https://github.com/kubernetes/minikube/pull/5842)
+* Health check previously configured driver & exit if not installed [#5840](https://github.com/kubernetes/minikube/pull/5840)
+* Add memory and wait longer for TestFunctional tests, include node logs [#5852](https://github.com/kubernetes/minikube/pull/5852)
+* Improve message when selected driver is incompatible with existing cluster [#5854](https://github.com/kubernetes/minikube/pull/5854)
+* Update libmachine to point to latest [#5877](https://github.com/kubernetes/minikube/pull/5877)
+* none driver: Warn about --cpus, --memory, and --container-runtime settings [#5845](https://github.com/kubernetes/minikube/pull/5845)
+* Refactor config.Config to prepare for multinode [#5889](https://github.com/kubernetes/minikube/pull/5889)
+
+Huge thank you for this release towards our contributors: 
+- Anders Björklund
+- Aresforchina
+- Igor Zibarev
+- Josh Woodcock
+- Medya Ghazizadeh
+- Nanik T
+- Priya Wadhwa
+- RA489
+- Ruslan Gustomiasov
+- Sharif Elgamal
+- Steffen Gransow
+- Thomas Strömberg
+
+## Version 1.5.2 - 2019-10-31 (Happy Halloween!)
+
+* service: fix --url mode [#5790](https://github.com/kubernetes/minikube/pull/5790)
+* Refactor command runner interface, allow stdin writes [#5530](https://github.com/kubernetes/minikube/pull/5530)
+* macOS install docs: minikube is a normal Homebrew formula now [#5750](https://github.com/kubernetes/minikube/pull/5750)
+* Allow CPU count check to be disabled using --force [#5803](https://github.com/kubernetes/minikube/pull/5803)
+* Make network validation friendlier, especially to corp networks [#5802](https://github.com/kubernetes/minikube/pull/5802)
+
+Thank you to our contributors for this release:
+
+- Anders F Björklund
+- Issy Long
+- Medya Ghazizadeh
+- Thomas Strömberg
+
+## Version 1.5.1 - 2019-10-29
+
+* Set Docker open-files limit ( 'ulimit -n') to be consistent with other runtimes [#5761](https://github.com/kubernetes/minikube/pull/5761)
+* Use fixed uid/gid for the default user account [#5767](https://github.com/kubernetes/minikube/pull/5767)
+* Set --wait=false to default but still wait for apiserver [#5757](https://github.com/kubernetes/minikube/pull/5757)
+* kubelet: Pass --config to use kubeadm generated configuration [#5697](https://github.com/kubernetes/minikube/pull/5697)
+* Refactor to remove opening browser and just return url(s) [#5718](https://github.com/kubernetes/minikube/pull/5718)
+
+Huge thank you for this release towards our contributors:
+
+- Anders F Björklund
+- Medya Ghazizadeh
+- Nanik T
+- Priya Wadhwa
+- Sharif Elgamal
+- Thomas Strömberg
+
+## Version 1.5.0 - 2019-10-25
+
+* Default to best-available local hypervisor rather than VirtualBox [#5700](https://github.com/kubernetes/minikube/pull/5700)
+* Update default Kubernetes version to v1.16.2 [#5731](https://github.com/kubernetes/minikube/pull/5731)
+* Add json output for status [#5611](https://github.com/kubernetes/minikube/pull/5611)
+* gvisor: Use chroot instead of LD_LIBRARY_PATH [#5735](https://github.com/kubernetes/minikube/pull/5735)
+* Hide innocuous viper ConfigFileNotFoundError [#5732](https://github.com/kubernetes/minikube/pull/5732)
+
+Thank you to our contributors!
+
+- Anders F Björklund
+- duohedron
+- Javis Zhou
+- Josh Woodcock
+- Kenta Iso
+- Marek Schwarz
+- Medya Ghazizadeh
+- Nanik T
+- Rob Bruce
+- Sharif Elgamal
+- Thomas Strömberg
+
+## Version 1.5.0-beta.0 - 2019-10-21
+
+* Fix node InternalIP not matching host-only address [#5427](https://github.com/kubernetes/minikube/pull/5427)
+* Add helm-tiller addon [#5363](https://github.com/kubernetes/minikube/pull/5363)
+* Add ingress-dns addon [#5507](https://github.com/kubernetes/minikube/pull/5507)
+* Add validation checking for minikube profile [#5624](https://github.com/kubernetes/minikube/pull/5624)
+* add ability to override autoupdating drivers [#5640](https://github.com/kubernetes/minikube/pull/5640)
+* Add option to  configure  dnsDomain in kubeAdm [#5566](https://github.com/kubernetes/minikube/pull/5566)
+* Added flags to purge configuration with minikube delete [#5548](https://github.com/kubernetes/minikube/pull/5548)
+* Upgrade Buildroot to 2019.02 and VirtualBox to 5.2 [#5609](https://github.com/kubernetes/minikube/pull/5609)
+* Add libmachine debug logs back [#5574](https://github.com/kubernetes/minikube/pull/5574)
+* Add JSON output for addons list [#5601](https://github.com/kubernetes/minikube/pull/5601)
+* Update default Kubernetes version to 1.16.1 [#5593](https://github.com/kubernetes/minikube/pull/5593)
+* Upgrade nginx ingress controller to 0.26.1 [#5514](https://github.com/kubernetes/minikube/pull/5514)
+* Initial translations for fr, es, de, ja, and zh-CN [#5466](https://github.com/kubernetes/minikube/pull/5466)
+* PL translation [#5491](https://github.com/kubernetes/minikube/pull/5491)
+* Warn if incompatible kubectl version is in use [#5596](https://github.com/kubernetes/minikube/pull/5596)
+* Fix crash when deleting the cluster but it doesn't exist [#4980](https://github.com/kubernetes/minikube/pull/4980)
+* Add json output for profile list [#5554](https://github.com/kubernetes/minikube/pull/5554)
+* Allow addon enabling and disabling when minikube is not running [#5565](https://github.com/kubernetes/minikube/pull/5565)
+* Added option to delete all profiles [#4780](https://github.com/kubernetes/minikube/pull/4780)
+* Replace registry-creds addon ReplicationController with Deployment [#5586](https://github.com/kubernetes/minikube/pull/5586)
+* Performance and security enhancement for ingress-dns addon [#5614](https://github.com/kubernetes/minikube/pull/5614)
+* Add addons flag to 'minikube start' in order to enable specified addons [#5543](https://github.com/kubernetes/minikube/pull/5543)
+* Warn when a user tries to set a profile name that is unlikely to be valid [#4999](https://github.com/kubernetes/minikube/pull/4999)
+* Make error message more human readable [#5563](https://github.com/kubernetes/minikube/pull/5563)
+* Adjusted Terminal Style Detection [#5508](https://github.com/kubernetes/minikube/pull/5508)
+* Fixes image repository flags when using CRI-O and containerd runtime [#5447](https://github.com/kubernetes/minikube/pull/5447)
+* fix "minikube update-context" command fail [#5626](https://github.com/kubernetes/minikube/pull/5626)
+* Fix pods not being scheduled when ingress deployment is patched [#5519](https://github.com/kubernetes/minikube/pull/5519)
+* Fix order of parameters to CurrentContext funcs [#5439](https://github.com/kubernetes/minikube/pull/5439)
+* Add solution for VERR_VMX_MSR_ALL_VMX_DISABLED [#5460](https://github.com/kubernetes/minikube/pull/5460)
+* fr: fix translations of environment & existent [#5483](https://github.com/kubernetes/minikube/pull/5483)
+* optimizing Chinese translation [#5201](https://github.com/kubernetes/minikube/pull/5201)
+* Change systemd unit files perm to 644 [#5492](https://github.com/kubernetes/minikube/pull/5492)
+
+Huge thank you for this release towards our contributors:
+- Anders F Björklund
+- bhanu011
+- chentanjun
+- Cornelius Weig
+- Doug A
+- hwdef
+- James Peach
+- Josh Woodcock
+- Kenta Iso
+- Marcin Niemira
+- Medya Ghazizadeh
+- Nanik T
+- Pranav Jituri
+- Samuel Almeida
+- serhatcetinkaya
+- Sharif Elgamal
+- tanjunchen
+- Thomas Strömberg
+- u5surf
+- yugo horie
+- yuxiaobo
+- Zhongcheng Lao
+- Zoltán Reegn
+
+
 ## Version 1.4.0 - 2019-09-17
 
 Notable user-facing changes:
@@ -401,7 +926,7 @@ Thank you to the contributors whose work made v1.1 into something we could all b
 * Add port name to service struct used in minikube service [#4011](https://github.com/kubernetes/minikube/pull/4011)
 * Update Hyper-V daemons [#4030](https://github.com/kubernetes/minikube/pull/4030)
 * Avoid surfacing "error: no objects passed to apply" non-error from addon-manager [#4076](https://github.com/kubernetes/minikube/pull/4076)
-* Don't cache images when --vmdriver=none [#4059](https://github.com/kubernetes/minikube/pull/4059)
+* Don't cache images when --vm-driver=none [#4059](https://github.com/kubernetes/minikube/pull/4059)
 * Enable CONFIG_NF_CONNTRACK_ZONES  [#3755](https://github.com/kubernetes/minikube/pull/3755)
 * Fixed status checking with non-default apiserver-port. [#4058](https://github.com/kubernetes/minikube/pull/4058)
 * Escape systemd special chars in docker-env [#3997](https://github.com/kubernetes/minikube/pull/3997)
@@ -784,7 +1309,7 @@ Huge thank you for this release towards our contributors:
 
 * Issue #3037 change dependency management to dep [#3136](https://github.com/kubernetes/minikube/pull/3136)
 * Update dashboard version to v1.10.0 [#3122](https://github.com/kubernetes/minikube/pull/3122)
-* fix: --format outputs any string, --https only subsitute http URL scheme [#3114](https://github.com/kubernetes/minikube/pull/3114)
+* fix: --format outputs any string, --https only substitute http URL scheme [#3114](https://github.com/kubernetes/minikube/pull/3114)
 * Change default docker storage driver to overlay2 [#3121](https://github.com/kubernetes/minikube/pull/3121)
 * Add env variable for default ES_JAVA_OPTS [#3086](https://github.com/kubernetes/minikube/pull/3086)
 * fix(cli): `minikube start --mount --mountsting` without write permission [#2671](https://github.com/kubernetes/minikube/pull/2671)

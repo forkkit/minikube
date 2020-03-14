@@ -17,11 +17,9 @@ limitations under the License.
 package util
 
 import (
-	"bytes"
-	"fmt"
-	"strings"
-	"sync"
 	"testing"
+
+	"github.com/blang/semver"
 )
 
 func TestGetBinaryDownloadURL(t *testing.T) {
@@ -44,80 +42,34 @@ func TestGetBinaryDownloadURL(t *testing.T) {
 
 }
 
-func TestTeePrefix(t *testing.T) {
-	var in bytes.Buffer
-	var out bytes.Buffer
-	var logged strings.Builder
-
-	logSink := func(format string, args ...interface{}) {
-		logged.WriteString("(" + fmt.Sprintf(format, args...) + ")")
-	}
-
-	// Simulate the primary use case: tee in the background. This also helps avoid I/O races.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		if err := TeePrefix(":", &in, &out, logSink); err != nil {
-			t.Errorf("TeePrefix: %v", err)
-		}
-		wg.Done()
-	}()
-
-	in.Write([]byte("goo"))
-	in.Write([]byte("\n"))
-	in.Write([]byte("g\r\n\r\n"))
-	in.Write([]byte("le"))
-	wg.Wait()
-
-	gotBytes := out.Bytes()
-	wantBytes := []byte("goo\ng\r\n\r\nle")
-	if !bytes.Equal(gotBytes, wantBytes) {
-		t.Errorf("output=%q, want: %q", gotBytes, wantBytes)
-	}
-
-	gotLog := logged.String()
-	wantLog := "(:goo)(:g)(:le)"
-	if gotLog != wantLog {
-		t.Errorf("log=%q, want: %q", gotLog, wantLog)
-	}
-}
-
-func TestReplaceChars(t *testing.T) {
+func TestCalculateSizeInMB(t *testing.T) {
 	testData := []struct {
-		src         []string
-		replacer    *strings.Replacer
-		expectedRes []string
+		size           string
+		expectedNumber int
 	}{
-		{[]string{"abc%def", "%Y%"}, strings.NewReplacer("%", "X"), []string{"abcXdef", "XYX"}},
+		{"1024kb", 1},
+		{"1024KB", 1},
+		{"1024mb", 1024},
+		{"1024b", 0},
 	}
 
 	for _, tt := range testData {
-		res := ReplaceChars(tt.src, tt.replacer)
-		for i, val := range res {
-			if val != tt.expectedRes[i] {
-				t.Fatalf("Expected '%s' but got '%s'", tt.expectedRes, res)
-			}
+		number, err := CalculateSizeInMB(tt.size)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if number != tt.expectedNumber {
+			t.Fatalf("Expected '%d'' but got '%d'", tt.expectedNumber, number)
 		}
 	}
 }
 
-func TestConcatStrings(t *testing.T) {
-	testData := []struct {
-		src         []string
-		prefix      string
-		postfix     string
-		expectedRes []string
-	}{
-		{[]string{"abc", ""}, "xx", "yy", []string{"xxabcyy", "xxyy"}},
-		{[]string{"abc", ""}, "", "", []string{"abc", ""}},
+func TestParseKubernetesVersion(t *testing.T) {
+	version, err := ParseKubernetesVersion("v1.8.0-alpha.5")
+	if err != nil {
+		t.Fatalf("Error parsing version: %v", err)
 	}
-
-	for _, tt := range testData {
-		res := ConcatStrings(tt.src, tt.prefix, tt.postfix)
-		for i, val := range res {
-			if val != tt.expectedRes[i] {
-				t.Fatalf("Expected '%s' but got '%s'", tt.expectedRes, res)
-			}
-		}
+	if version.NE(semver.MustParse("1.8.0-alpha.5")) {
+		t.Errorf("Expected: %s, Actual:%s", "1.8.0-alpha.5", version)
 	}
 }

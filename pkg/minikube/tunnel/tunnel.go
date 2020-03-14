@@ -29,7 +29,7 @@ import (
 	"github.com/pkg/errors"
 	typed_core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/minikube/pkg/minikube/config"
-	"k8s.io/minikube/pkg/minikube/constants"
+	"k8s.io/minikube/pkg/minikube/driver"
 )
 
 // tunnel represents the basic API for a tunnel: periodically the state of the tunnel
@@ -72,7 +72,7 @@ func newTunnel(machineName string, machineAPI libmachine.API, configLoader confi
 		clusterInspector:     ci,
 		router:               router,
 		registry:             registry,
-		loadBalancerEmulator: newLoadBalancerEmulator(v1Core),
+		LoadBalancerEmulator: NewLoadBalancerEmulator(v1Core),
 		status: &Status{
 			TunnelID:      id,
 			MinikubeState: state,
@@ -88,7 +88,7 @@ type tunnel struct {
 	// collaborators
 	clusterInspector     *clusterInspector
 	router               router
-	loadBalancerEmulator loadBalancerEmulator
+	LoadBalancerEmulator LoadBalancerEmulator
 	reporter             reporter
 	registry             *persistentRegistry
 
@@ -108,7 +108,7 @@ func (t *tunnel) cleanup() *Status {
 		}
 	}
 	if t.status.MinikubeState == Running {
-		t.status.PatchedServices, t.status.LoadBalancerEmulatorError = t.loadBalancerEmulator.Cleanup()
+		t.status.PatchedServices, t.status.LoadBalancerEmulatorError = t.LoadBalancerEmulator.Cleanup()
 	}
 	return t.status
 }
@@ -122,7 +122,7 @@ func (t *tunnel) update() *Status {
 		glog.V(3).Infof("minikube is running, trying to add route%s", t.status.TunnelID.Route)
 		setupRoute(t, h)
 		if t.status.RouteError == nil {
-			t.status.PatchedServices, t.status.LoadBalancerEmulatorError = t.loadBalancerEmulator.PatchServices()
+			t.status.PatchedServices, t.status.LoadBalancerEmulatorError = t.LoadBalancerEmulator.PatchServices()
 		}
 	}
 	glog.V(3).Infof("sending report %s", t.status)
@@ -150,7 +150,7 @@ func setupRoute(t *tunnel, h *host.Host) {
 			return
 		}
 
-		if h.DriverName == constants.DriverHyperkit {
+		if h.DriverName == driver.HyperKit {
 			// the virtio-net interface acts up with ip tunnels :(
 			setupBridge(t)
 			if t.status.RouteError != nil {

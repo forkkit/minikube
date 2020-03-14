@@ -23,16 +23,13 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/docker/machine/libmachine"
 	"github.com/golang/glog"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"k8s.io/kubectl/pkg/util/templates"
 	configCmd "k8s.io/minikube/cmd/minikube/cmd/config"
-	"k8s.io/minikube/pkg/minikube/bootstrapper"
-	"k8s.io/minikube/pkg/minikube/bootstrapper/kubeadm"
+	"k8s.io/minikube/pkg/drivers/kic/oci"
 	"k8s.io/minikube/pkg/minikube/config"
 	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/pkg/minikube/exit"
@@ -53,9 +50,9 @@ var dirs = [...]string{
 }
 
 var viperWhiteList = []string{
-	"v",
 	"alsologtostderr",
 	"log_dir",
+	"v",
 }
 
 // RootCmd represents the base command when called without any subcommands
@@ -101,6 +98,11 @@ func Execute() {
 		// add minikube binaries to the path
 		targetDir := localpath.MakeMiniPath("bin")
 		addToPath(targetDir)
+	}
+
+	// Universally ensure that we never speak to the wrong DOCKER_HOST
+	if err := oci.PointToHostDockerDaemon(); err != nil {
+		glog.Errorf("oci env: %v", err)
 	}
 
 	if err := RootCmd.Execute(); err != nil {
@@ -160,8 +162,8 @@ func setFlagsUsingViper() {
 
 func init() {
 	translate.DetermineLocale()
-	RootCmd.PersistentFlags().StringP(config.MachineProfile, "p", constants.DefaultMachineName, `The name of the minikube VM being used. This can be set to allow having multiple instances of minikube independently.`)
-	RootCmd.PersistentFlags().StringP(configCmd.Bootstrapper, "b", constants.DefaultClusterBootstrapper, "The name of the cluster bootstrapper that will set up the kubernetes cluster.")
+	RootCmd.PersistentFlags().StringP(config.ProfileName, "p", constants.DefaultClusterName, `The name of the minikube VM being used. This can be set to allow having multiple instances of minikube independently.`)
+	RootCmd.PersistentFlags().StringP(configCmd.Bootstrapper, "b", "kubeadm", "The name of the cluster bootstrapper that will set up the kubernetes cluster.")
 
 	groups := templates.CommandGroups{
 		{
@@ -172,12 +174,15 @@ func init() {
 				stopCmd,
 				deleteCmd,
 				dashboardCmd,
+				pauseCmd,
+				unpauseCmd,
 			},
 		},
 		{
 			Message: translate.T("Images Commands:"),
 			Commands: []*cobra.Command{
 				dockerEnvCmd,
+				podmanEnvCmd,
 				cacheCmd,
 			},
 		},
@@ -203,6 +208,7 @@ func init() {
 				mountCmd,
 				sshCmd,
 				kubectlCmd,
+				nodeCmd,
 			},
 		},
 		{
@@ -213,6 +219,7 @@ func init() {
 				logsCmd,
 				updateCheckCmd,
 				versionCmd,
+				optionsCmd,
 			},
 		},
 	}
@@ -232,18 +239,20 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	configPath := constants.ConfigFile
+	configPath := localpath.ConfigFile()
 	viper.SetConfigFile(configPath)
 	viper.SetConfigType("json")
-	err := viper.ReadInConfig()
-	if err != nil {
-		glog.Warningf("Error reading config file at %s: %v", configPath, err)
+	if err := viper.ReadInConfig(); err != nil {
+		// This config file is optional, so don't emit errors if missing
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			glog.Warningf("Error reading config file at %s: %v", configPath, err)
+		}
 	}
 	setupViper()
 }
 
 func setupViper() {
-	viper.SetEnvPrefix(constants.MinikubeEnvPrefix)
+	viper.SetEnvPrefix(minikubeEnvPrefix)
 	// Replaces '-' in flags with '_' in env variables
 	// e.g. iso-url => $ENVPREFIX_ISO_URL
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
@@ -258,23 +267,6 @@ func setupViper() {
 	viper.SetDefault(config.ShowDriverDeprecationNotification, true)
 	viper.SetDefault(config.ShowBootstrapperDeprecationNotification, true)
 	setFlagsUsingViper()
-}
-
-// getClusterBootstrapper returns a new bootstrapper for the cluster
-func getClusterBootstrapper(api libmachine.API, bootstrapperName string) (bootstrapper.Bootstrapper, error) {
-	var b bootstrapper.Bootstrapper
-	var err error
-	switch bootstrapperName {
-	case bootstrapper.BootstrapperTypeKubeadm:
-		b, err = kubeadm.NewKubeadmBootstrapper(api)
-		if err != nil {
-			return nil, errors.Wrap(err, "getting kubeadm bootstrapper")
-		}
-	default:
-		return nil, fmt.Errorf("unknown bootstrapper: %s", bootstrapperName)
-	}
-
-	return b, nil
 }
 
 func addToPath(dir string) {

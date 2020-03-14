@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,17 +30,22 @@ import (
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"k8s.io/minikube/pkg/minikube/cluster"
 	"k8s.io/minikube/pkg/minikube/config"
-	"k8s.io/minikube/pkg/minikube/constants"
+	"k8s.io/minikube/pkg/minikube/driver"
 	"k8s.io/minikube/pkg/minikube/exit"
 	"k8s.io/minikube/pkg/minikube/machine"
 	"k8s.io/minikube/pkg/minikube/out"
 	"k8s.io/minikube/third_party/go9p/ufs"
 )
 
-// nineP is the value of --type used for the 9p filesystem.
-const nineP = "9p"
+const (
+	// nineP is the value of --type used for the 9p filesystem.
+	nineP               = "9p"
+	defaultMountVersion = "9p2000.L"
+	defaultMsize        = 262144
+)
 
 // placeholders for flag values
 var mountIP string
@@ -98,12 +104,20 @@ var mountCmd = &cobra.Command{
 			exit.WithError("Error getting client", err)
 		}
 		defer api.Close()
-		host, err := api.Load(config.GetMachineName())
+		cc, err := config.Load(viper.GetString(config.ProfileName))
+		if err != nil {
+			exit.WithError("Error getting config", err)
+		}
 
+		cp, err := config.PrimaryControlPlane(cc)
+		if err != nil {
+			exit.WithError("Error getting primary cp", err)
+		}
+		host, err := api.Load(driver.MachineName(*cc, cp))
 		if err != nil {
 			exit.WithError("Error loading api", err)
 		}
-		if host.Driver.DriverName() == constants.DriverNone {
+		if host.Driver.DriverName() == driver.None {
 			exit.UsageT(`'none' driver does not support 'minikube mount' command`)
 		}
 		var ip net.IP
@@ -143,6 +157,15 @@ var mountCmd = &cobra.Command{
 			cfg.Options[parts[0]] = parts[1]
 		}
 
+		// An escape valve to allow future hackers to try NFS, VirtFS, or other FS types.
+		if !supportedFilesystems[cfg.Type] {
+			out.T(out.Warning, "{{.type}} is not yet a supported filesystem. We will try anyways!", out.V{"type": cfg.Type})
+		}
+
+		bindIP := ip.String() // the ip to listen on the user's host machine
+		if driver.IsKIC(host.Driver.DriverName()) && runtime.GOOS != "linux" {
+			bindIP = "127.0.0.1"
+		}
 		out.T(out.Mounting, "Mounting host path {{.sourcePath}} into VM as {{.destinationPath}} ...", out.V{"sourcePath": hostPath, "destinationPath": vmPath})
 		out.T(out.Option, "Mount type:   {{.name}}", out.V{"type": cfg.Type})
 		out.T(out.Option, "User ID:      {{.userID}}", out.V{"userID": cfg.UID})
@@ -151,18 +174,14 @@ var mountCmd = &cobra.Command{
 		out.T(out.Option, "Message Size: {{.size}}", out.V{"size": cfg.MSize})
 		out.T(out.Option, "Permissions:  {{.octalMode}} ({{.writtenMode}})", out.V{"octalMode": fmt.Sprintf("%o", cfg.Mode), "writtenMode": cfg.Mode})
 		out.T(out.Option, "Options:      {{.options}}", out.V{"options": cfg.Options})
-
-		// An escape valve to allow future hackers to try NFS, VirtFS, or other FS types.
-		if !supportedFilesystems[cfg.Type] {
-			out.T(out.WarningType, "{{.type}} is not yet a supported filesystem. We will try anyways!", out.V{"type": cfg.Type})
-		}
+		out.T(out.Option, "Bind Address: {{.Address}}", out.V{"Address": net.JoinHostPort(bindIP, fmt.Sprint(port))})
 
 		var wg sync.WaitGroup
 		if cfg.Type == nineP {
 			wg.Add(1)
 			go func() {
 				out.T(out.Fileserver, "Userspace file server: ")
-				ufs.StartServer(net.JoinHostPort(ip.String(), strconv.Itoa(port)), debugVal, hostPath)
+				ufs.StartServer(net.JoinHostPort(bindIP, strconv.Itoa(port)), debugVal, hostPath)
 				out.T(out.Stopped, "Userspace file server is shutdown")
 				wg.Done()
 			}()
@@ -202,13 +221,13 @@ var mountCmd = &cobra.Command{
 func init() {
 	mountCmd.Flags().StringVar(&mountIP, "ip", "", "Specify the ip that the mount should be setup on")
 	mountCmd.Flags().StringVar(&mountType, "type", nineP, "Specify the mount filesystem type (supported types: 9p)")
-	mountCmd.Flags().StringVar(&mountVersion, "9p-version", constants.DefaultMountVersion, "Specify the 9p version that the mount should use")
+	mountCmd.Flags().StringVar(&mountVersion, "9p-version", defaultMountVersion, "Specify the 9p version that the mount should use")
 	mountCmd.Flags().BoolVar(&isKill, "kill", false, "Kill the mount process spawned by minikube start")
 	mountCmd.Flags().StringVar(&uid, "uid", "docker", "Default user id used for the mount")
 	mountCmd.Flags().StringVar(&gid, "gid", "docker", "Default group id used for the mount")
 	mountCmd.Flags().UintVar(&mode, "mode", 0755, "File permissions used for the mount")
 	mountCmd.Flags().StringSliceVar(&options, "options", []string{}, "Additional mount options, such as cache=fscache")
-	mountCmd.Flags().IntVar(&mSize, "msize", constants.DefaultMsize, "The number of bytes to use for 9p packet payload")
+	mountCmd.Flags().IntVar(&mSize, "msize", defaultMsize, "The number of bytes to use for 9p packet payload")
 }
 
 // getPort asks the kernel for a free open port that is ready to use

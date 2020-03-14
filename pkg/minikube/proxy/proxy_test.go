@@ -33,6 +33,7 @@ func TestIsValidEnv(t *testing.T) {
 		{"", false},
 		{"HTTPS-PROXY", false},
 		{"NOPROXY", false},
+		{"http_proxy", true},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.env, func(t *testing.T) {
@@ -241,7 +242,7 @@ func TestUpdateTransport(t *testing.T) {
 		rt := c.WrapTransport(nil)
 
 		if rt == rc.WrapTransport(transport) {
-			t.Fatalf("Excpected to reuse existing RoundTripper(%v) but found %v", rt, transport)
+			t.Fatalf("Expected to reuse existing RoundTripper(%v) but found %v", rt, transport)
 		}
 
 	})

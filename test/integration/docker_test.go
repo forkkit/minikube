@@ -23,27 +23,26 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDockerFlags(t *testing.T) {
 	if NoneDriver() {
 		t.Skip("skipping: none driver does not support ssh or bundle docker")
 	}
-	MaybeSlowParallel(t)
+	MaybeParallel(t)
 
 	profile := UniqueProfileName("docker-flags")
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), Minutes(30))
 	defer CleanupWithLogs(t, profile, cancel)
 
 	// Use the most verbose logging for the simplest test. If it fails, something is very wrong.
-	args := append([]string{"start", "-p", profile, "--wait=false", "--docker-env=FOO=BAR", "--docker-env=BAZ=BAT", "--docker-opt=debug", "--docker-opt=icc=true", "--alsologtostderr", "-v=5"}, StartArgs()...)
+	args := append([]string{"start", "-p", profile, "--cache-images=false", "--memory=1800", "--install-addons=false", "--wait=false", "--docker-env=FOO=BAR", "--docker-env=BAZ=BAT", "--docker-opt=debug", "--docker-opt=icc=true", "--alsologtostderr", "-v=5"}, StartArgs()...)
 	rr, err := Run(t, exec.CommandContext(ctx, Target(), args...))
 	if err != nil {
 		t.Errorf("%s failed: %v", rr.Args, err)
 	}
 
-	rr, err = Run(t, exec.CommandContext(ctx, Target(), "-p", profile, "ssh", "systemctl show docker --property=Environment --no-pager"))
+	rr, err = Run(t, exec.CommandContext(ctx, Target(), "-p", profile, "ssh", "sudo systemctl show docker --property=Environment --no-pager"))
 	if err != nil {
 		t.Errorf("%s failed: %v", rr.Args, err)
 	}
@@ -54,7 +53,7 @@ func TestDockerFlags(t *testing.T) {
 		}
 	}
 
-	rr, err = Run(t, exec.CommandContext(ctx, Target(), "-p", profile, "ssh", "systemctl show docker --property=ExecStart --no-pager"))
+	rr, err = Run(t, exec.CommandContext(ctx, Target(), "-p", profile, "ssh", "sudo systemctl show docker --property=ExecStart --no-pager"))
 	if err != nil {
 		t.Errorf("%s failed: %v", rr.Args, err)
 	}
